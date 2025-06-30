@@ -79,6 +79,10 @@ export default function MapScreen({ route, navigation }: any) {
   const [text, setText] = useState('');
   const [detailShout, setDetailShout] = useState<Shout>();
 
+  // ▶️ location-search state
+  const [searchQuery, setSearchQuery]     = useState('');
+  const [searchCenter, setSearchCenter]   = useState<{lat:number;lng:number} | null>(null);
+
   // 1) Auto-open modal if requested
   useEffect(() => {
   // grab our two boolean flags without clobbering your function names
@@ -155,8 +159,9 @@ useEffect(() => {
 
   // 4) Push updated shouts into the WebView
   useEffect(() => {
-    if (!ready || !coords) return;
-    const { lat: userLat, lng: userLng } = coords;        // now guaranteed non-null
+    // wait until either real coords or a searchCenter exist
+    if (!ready || (!coords && !searchCenter)) return;
+    const { lat: userLat, lng: userLng } = searchCenter ?? coords!;
     
     // ➊ bounding‐box pre‐filter:
     const maybe = shouts.filter(s => {
@@ -195,7 +200,7 @@ useEffect(() => {
       true;
     `;
     wv.current?.injectJavaScript(jsToInject);
-  }, [ready, shouts, coords]);
+  }, [ready, shouts, coords, searchCenter]);
 
   // 5) Submit a new text shout
   async function onSubmit() {
@@ -347,6 +352,35 @@ useEffect(() => {
   wv.current?.injectJavaScript(js);
   }
 
+  // Search
+  async function onSearch() {
+    if (!searchQuery.trim()) return;
+    try {
+      const res = await fetch(
+        `https://api.tomtom.com/search/2/geocode/${encodeURIComponent(searchQuery)}.json?key=${TOMTOM_KEY}`
+      );
+      const json = await res.json();
+      const pos  = json.results?.[0]?.position;
+      if (pos) {
+        // ➊ remember the new center
+        setSearchCenter({ lat: pos.lat, lng: pos.lon });
+        // ➋ update your address bar to show the query
+        setAddress(searchQuery);
+        // ➌ inject JS so the WebView map recenters
+        const recenterJS = `
+          map.setCenter([${pos.lon}, ${pos.lat}]);
+          true; 
+        `;
+        wv.current?.injectJavaScript(recenterJS);
+      } else {
+        Alert.alert('Not found', 'Could not locate that address.');
+      }
+    } catch (e: any) {
+      Alert.alert('Search failed', e.message);
+    }
+  }
+
+
   // right before any JSX, e.g. above "return ("
   const currentUid = auth.currentUser?.uid ?? '';
   // If detailShout is set, check if this user has already liked it:
@@ -354,7 +388,19 @@ useEffect(() => {
 
   return (
     <SafeAreaView style={styles.container}>
-      
+      {/* ─── Search bar ───────────────────────────── */}
+      <View style={styles.searchBar}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search location"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          returnKeyType="search"
+          onSubmitEditing={onSearch}
+        />
+        <Button title="Go" onPress={onSearch} />
+      </View>
+
       <WebView
         ref={wv}
         source={{ html }}
@@ -516,5 +562,19 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 12,
   },
-  
+  searchBar: {
+    flexDirection: 'row',
+    padding: 8,
+    backgroundColor: '#FFF',
+    alignItems: 'center',
+  },
+  searchInput: {
+    flex: 1,
+    height: 40,
+    borderWidth: 1,
+    borderColor: '#CCC',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    marginRight: 8,
+  },
 });
