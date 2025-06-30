@@ -256,8 +256,8 @@ useEffect(() => {
     key: '${TOMTOM_KEY}',
     container: 'map',
     center: [${coords?.lng}, ${coords?.lat}],
-    zoom: 14
-    
+    zoom: 14,
+    style: "https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAMzJSMkJDa1NmTGNvR2h3RzsO9cOMFdVDGI-DPwgg0BlM.json?key=${TOMTOM_KEY}" // <--- UPDATED LINE
   });
 
   // 2) add “you are here” marker
