@@ -3,6 +3,11 @@ import React, { useState, useRef, useEffect } from 'react';
 // locateMe libs
 import { TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';  // or whatever icon lib you use
+//likes
+import { updateDoc, increment } from 'firebase/firestore';
+import { runTransaction, arrayUnion } from 'firebase/firestore';
+
+
 
 import {
   SafeAreaView,
@@ -40,6 +45,9 @@ type Shout = {
   authorName: string;
   ownerId: string;       // ← added
   createdAt: number;     // millis since epoch
+  likeCount: number;
+  likedBy: string[];
+  radius: number; 
 };
 
 export default function MapScreen({ route, navigation }: any) {
@@ -130,6 +138,9 @@ useEffect(() => {
               lng: data.location.longitude,
               authorName: data.authorName || 'Anonymous',
               ownerId: data.ownerId,           // ← capture ownerId here
+              likeCount: data.likeCount || 0,   // ← grab it from Firestore
+              likedBy: data.likedBy || [],
+              radius:     data.radius     || 500,
               createdAt: ts,
             });
           }
@@ -145,14 +156,29 @@ useEffect(() => {
   // 4) Push updated shouts into the WebView
   useEffect(() => {
     if (!ready || !coords) return;
-    const { lat, lng } = coords;        // now guaranteed non-null
-    const nearby = shouts.filter(s =>
-      getDistanceMeters(lat, lng, s.lat, s.lng) <= 500
-    );
+    const { lat: userLat, lng: userLng } = coords;        // now guaranteed non-null
     
+    // ➊ bounding‐box pre‐filter:
+    const maybe = shouts.filter(s => {
+    // 1° lat ≈ 111320 m
+    const latDelta = s.radius / 111_320;
+    // 1° lng ≈ 111320 m * cos(latitude)
+    const lngDelta =
+      s.radius / (111_320 * Math.cos(s.lat * Math.PI / 180));
+    return (
+      Math.abs(userLat - s.lat) <= latDelta &&
+      Math.abs(userLng - s.lng) <= lngDelta
+    );
+ });
+
+  // ➋ on that small set, do the precise check:
+  const visible = maybe.filter(s =>
+    getDistanceMeters(userLat, userLng, s.lat, s.lng) <= s.radius
+  );
+
     const payload = JSON.stringify({
       type: 'shouts',
-      data: nearby.map(s => ({
+      data: visible.map(s => ({
       id:        s.id,
       text:      s.text,
       lat:       s.lat,
@@ -185,6 +211,9 @@ useEffect(() => {
       ownerId: auth.currentUser?.uid,          // ← include ownerId on create
       location: new GeoPoint(coords.lat, coords.lng),
       createdAt: serverTimestamp(),
+      likeCount: 0,
+      likedBy: [] as string[],
+      radius:     500,               // ← initial radius in meters
     });
 
     setText('');
@@ -318,7 +347,10 @@ useEffect(() => {
   wv.current?.injectJavaScript(js);
   }
 
-
+  // right before any JSX, e.g. above "return ("
+  const currentUid = auth.currentUser?.uid ?? '';
+  // If detailShout is set, check if this user has already liked it:
+  const isLiked = !!detailShout && detailShout.likedBy.includes(currentUid);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -360,6 +392,37 @@ useEffect(() => {
                 }}
               />
             )}
+            <Text style={{ marginTop: 8, marginBottom: 4 }}>
+              Likes: {detailShout?.likeCount ?? 0}
+            </Text>
+            <Button
+              title={isLiked ? '👍 Liked' : '👍 Like'}
+              onPress={async () => {
+                if (!detailShout || isLiked) return;
+
+                const shoutRef = doc(db, 'shouts', detailShout.id);
+                await runTransaction(db, async tx => {
+                  const snap = await tx.get(shoutRef);
+                  if (!snap.exists()) throw new Error('Shout not found');
+                  const data = snap.data() as any;
+
+                  // Prevent double‐likes
+                  const already = (data.likedBy as string[]) || [];
+                  if (already.includes(auth.currentUser!.uid)) return;
+
+                  // Compute new radius (100 m per like)
+                  const currentRadius = (data.radius as number) || 500;
+                  const newRadius     = currentRadius + 100;
+
+                  tx.update(shoutRef, {
+                    likedBy:    arrayUnion(auth.currentUser!.uid),
+                    likeCount:  increment(1),
+                    radius:     newRadius,
+                  });
+                });
+              }}
+              disabled={isLiked}
+            />
 
             <Button title="Close" onPress={() => setDetailShout(undefined)} />
           </View>
