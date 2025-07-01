@@ -7,6 +7,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 //likes
 import { updateDoc, increment } from 'firebase/firestore';
 import { runTransaction, arrayUnion } from 'firebase/firestore';
+import shared from '../components/SharedStyles'
 
 
 
@@ -416,129 +417,127 @@ useEffect(() => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* ─── Search bar ───────────────────────────── */}
-      <View style={styles.searchBar}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search location"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          returnKeyType="search"
-          onSubmitEditing={onSearch}
-        />
-        <Button title="Go" onPress={onSearch} />
-      </View>
-
-      <WebView
-        ref={wv}
-        source={{ html }}
-        originWhitelist={['*']}
-        onLoadEnd={() => setReady(true)}
-        onMessage={onWebMessage}
-        style={styles.webview}
+    {/* ─── Floating Search Pill ───────────────────────── */}
+    <View style={styles.searchBar}>
+      <TextInput
+        style={styles.searchInput}
+        placeholder="Search location"
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        returnKeyType="search"
+        onSubmitEditing={onSearch}
       />
+      <TouchableOpacity style={styles.searchButton} onPress={onSearch}>
+        <Text style={styles.searchButtonText}>GO</Text>
+      </TouchableOpacity>
+    </View>
 
-      {/* ─── Detail Modal ──────────────────────────── */}
-      <Modal visible={!!detailShout} transparent animationType="fade">
-        <View style={styles.backdrop}>
-          <View style={styles.modalCard}>
+    {/* ─── Map / WebView ──────────────────────────────── */}
+    <WebView
+      ref={wv}
+      source={{ html }}
+      originWhitelist={['*']}
+      onLoadEnd={() => setReady(true)}
+      onMessage={onWebMessage}
+      style={styles.webview}
+    />
 
-            {/* close “X” button */}
-            <TouchableOpacity
-              onPress={()=> setDetailShout(undefined)}
-              style={styles.closeButton}
-            >
-              <MaterialCommunityIcons name="close" size={24} />
-            </TouchableOpacity>
+    {/* ─── Detail “Shout” Modal ───────────────────────── */}
+    <Modal visible={!!detailShout} transparent animationType="fade">
+      <View style={styles.backdrop}>
+        <View style={styles.modalCard}>
+          {/* close “X” */}
+          <TouchableOpacity
+            onPress={() => setDetailShout(undefined)}
+            style={styles.closeButton}
+          >
+            <MaterialCommunityIcons name="close" size={24} />
+          </TouchableOpacity>
 
-            {/* header: avatar + title */}
-            <View style={styles.header}>
-              <View style={styles.avatarPlaceholder}>
-                {/* if you have user photoURL use <Image> here */}
-                <Text style={styles.avatarText}>
-                  {detailShout?.authorName.charAt(0)}
-                </Text>
-              </View>
-              <Text style={styles.modalTitle}>
-                {detailShout?.authorName} shouted
+          {/* avatar + title row */}
+          <View style={styles.header}>
+            <View style={styles.avatarPlaceholder}>
+              <Text style={styles.avatarText}>
+                {detailShout?.authorName.charAt(0)}
               </Text>
             </View>
-
-            {/* the shout message */}
-            <Text style={styles.message}>
-              {detailShout?.text}
+            <Text style={styles.modalTitle}>
+              {detailShout?.authorName} shouted
             </Text>
+          </View>
 
-            {/* expires link */}
-            <TouchableOpacity>
-              <Text style={styles.expiresText}>
-                Expires in {minutesLeft} minute
-                {minutesLeft===1?'':'s'}
+          {/* the shout text */}
+          <Text style={styles.message}>{detailShout?.text}</Text>
+
+          {/* expires info */}
+          <TouchableOpacity>
+            <Text style={styles.expiresText}>
+              Expires in {minutesLeft} minute{minutesLeft === 1 ? '' : 's'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* actions: like / delete */}
+          <View style={styles.actionsRow}>
+            <TouchableOpacity
+              onPress={onLikePress}
+              disabled={isLiked}
+              style={styles.actionButton}
+            >
+              <MaterialCommunityIcons
+                name={isLiked ? 'heart' : 'heart-outline'}
+                size={20}
+                color={isLiked ? '#E53935' : '#333'}
+              />
+              <Text style={styles.actionLabel}>
+                {isLiked ? 'Liked' : 'Like'}
               </Text>
             </TouchableOpacity>
 
-            {/* action buttons */}
-            <View style={styles.actionsRow}>
+            {isOwner && (
               <TouchableOpacity
-                onPress={onLikePress}
-                disabled={isLiked}
-                style={styles.actionButton}
+                onPress={onDeletePress}
+                style={[styles.actionButton, styles.deleteButton]}
               >
                 <MaterialCommunityIcons
-                  name={isLiked ? 'heart' : 'heart-outline'}
+                  name="trash-can-outline"
                   size={20}
-                  color={isLiked ? '#E53935' : '#333'}
+                  color="#E53935"
                 />
-                <Text style={styles.actionLabel}>
-                  {isLiked ? 'Liked' : 'Like'}
+                <Text style={[styles.actionLabel, { color: '#E53935' }]}>
+                  Delete
                 </Text>
               </TouchableOpacity>
-
-              {isOwner && (
-                <TouchableOpacity
-                  onPress={onDeletePress}
-                  style={[styles.actionButton, styles.deleteButton]}
-                >
-                  <MaterialCommunityIcons name="trash-can-outline" size={20} color="#E53935" />
-                  <Text style={[styles.actionLabel, { color:'#E53935' }]}>
-                    Delete
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            )}
           </View>
         </View>
-      </Modal>
+      </View>
+    </Modal>
 
-
-      {/* Shout Modal */}
-      <Modal visible={modalOpen} transparent animationType="slide">
-        <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Your Shout</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="What's new?"
-              value={text}
-              onChangeText={setText}
-            />
-            <View style={styles.buttonsRow}>
-              <Button title="Cancel" onPress={() => setModalOpen(false)} />
-              <Button title="Shout!" onPress={onSubmit} />
-            </View>
+    {/* ─── New Shout Modal ───────────────────────────── */}
+    <Modal visible={modalOpen} transparent animationType="slide">
+      <View style={styles.overlay}>
+        <View style={styles.modal}>
+          <Text style={styles.modalTitle}>Your Shout</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="What's new?"
+            value={text}
+            onChangeText={setText}
+          />
+          <View style={styles.buttonsRow}>
+            <Button title="Cancel" onPress={() => setModalOpen(false)} />
+            <Button title="Shout!" onPress={onSubmit} />
           </View>
         </View>
-      </Modal>
-    </SafeAreaView>
+      </View>
+    </Modal>
+  </SafeAreaView>
+
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    paddingTop:
-      Platform.OS === 'android' ? StatusBar.currentHeight : 0,
-  },
+  container: { flex: 1 },
   loading: {
     flex: 1,
     justifyContent: 'center',
@@ -598,20 +597,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 12,
   },
-  searchBar: {
+  /* searchBar: {
     flexDirection: 'row',
     padding: 8,
     backgroundColor: '#FFF',
     alignItems: 'center',
-  },
+  }, */
   searchInput: {
     flex: 1,
-    height: 40,
-    borderWidth: 1,
-    borderColor: '#CCC',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    marginRight: 8,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    backgroundColor: 'transparent',
   },
   backdrop: {
     flex: 1,
@@ -677,5 +673,39 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     marginLeft: 24,
+  },
+  searchBar: {
+    position: 'absolute',
+    top: Platform.OS === 'android'
+      ? StatusBar.currentHeight! + 8
+      : 8,
+    left: 16,
+    right: 16,
+    height: 40,
+    flexDirection: 'row',
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    overflow: 'hidden',
+    elevation: 3,          // Android shadow
+    shadowColor: '#000',   // iOS shadow
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    zIndex: 10,
+  },
+  topSafeArea: {
+    backgroundColor: '#FFF',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
+  searchButton: {
+    width: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#007AFF',
+  },
+  searchButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });

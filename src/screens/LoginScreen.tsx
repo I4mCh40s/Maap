@@ -7,7 +7,9 @@ import {
   Button,
   StyleSheet,
   Alert,
+  TouchableOpacity
 } from 'react-native';
+import shared from '../components/SharedStyles'
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { auth } from '../firebase';
 
@@ -49,18 +51,31 @@ export default function LoginScreen({ navigation }: Props) {
         value={password}
         onChangeText={setPassword}
       />
-      <Button title="Log in" onPress={onLogin} />
-      <Button
-        title="Create account"
+      <TouchableOpacity style={shared.button} onPress={onLogin}>
+        <Text style={shared.buttonText}>Log In</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[shared.button, { backgroundColor: '#005BBB' }]}
         onPress={() => navigation.navigate('Signup')}
-      />
+      >
+        <Text style={shared.buttonText}>Create Account</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 16 },
-  title:     { fontSize: 24, marginBottom: 16, textAlign: 'center' },
+  container: {
+    flex: 1,
+    padding: 24,
+    justifyContent: 'center',
+    backgroundColor: '#FFF',
+  },
+  title: {
+    fontSize: 24,
+    textAlign: 'center',
+    marginBottom: 32,
+  },
   input:     {
     borderWidth: 1,
     borderColor: '#CCC',

@@ -1,24 +1,21 @@
 // src/navigation/AppTabs.tsx
+// src/navigation/AppTabs.tsx
 import React from 'react';
 import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import { Ionicons }                   from '@expo/vector-icons';
-import { createBottomTabNavigator }   from '@react-navigation/bottom-tabs';
-import HomeScreen    from '../screens/MapScreen';
-import MapScreen     from '../screens/MapScreen';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { Ionicons } from '@expo/vector-icons';
+
+import HomeScreen from '../screens/MapScreen';
+import MapScreen from '../screens/MapScreen';
 import ProfileScreen from '../screens/ProfileScreen';
-import * as Linking  from 'expo-linking';
 
-const Tab = createBottomTabNavigator();
+type TabParamList = {
+  Home: undefined;
+  Add: { openShoutModal?: boolean };    // <— now Add can take that flag
+  Profile: undefined;
+};
 
-function LocateButton({ onPress }: { onPress(): void }) {
-  return (
-    <View style={styles.locateContainer}>
-      <TouchableOpacity onPress={onPress} style={styles.locateButton}>
-        <Ionicons name="navigate" size={24} color="#022B3A" />
-      </TouchableOpacity>
-    </View>
-  );
-}
+const Tab = createBottomTabNavigator<TabParamList>();
 
 export default function AppTabs() {
   return (
@@ -26,111 +23,129 @@ export default function AppTabs() {
       screenOptions={{ headerShown: false }}
       tabBar={props => <MyCustomTabBar {...props} />}
     >
-      <Tab.Screen name="Home"    component={HomeScreen}   />
-      <Tab.Screen name="Add"     component={MapScreen}    />
-      <Tab.Screen name="Profile" component={ProfileScreen}/>
+      <Tab.Screen name="Home" component={HomeScreen} />
+      <Tab.Screen
+        name="Add"
+        component={MapScreen}
+        listeners={({ navigation }) => ({
+          tabPress: e => {
+            // prevent default behavior
+            e.preventDefault();
+            // re-use MapScreen but trigger the shout modal
+            navigation.navigate('Add', { openShoutModal: true });
+          },
+        })}
+      />
+      <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );
 }
 
 function MyCustomTabBar({ state, descriptors, navigation }: any) {
-  // we’ll use the “Add” button to open the modal; locateMe below
   return (
-    <>
-      <LocateButton onPress={() => {
-        // tell MapScreen to recenter
-        navigation.navigate('Add', { shouldRecenter: true });
-      }} />
+    <View style={styles.tabBar}>
+      {state.routes.map((route: any, index: number) => {
+        const isFocused = state.index === index;
 
-      <View style={styles.tabBar}>
-        {state.routes.map((route: any, idx: number) => {
-          const isFocused = state.index === idx;
+        // Decide icon per route
+        let iconName: React.ComponentProps<typeof Ionicons>['name'] = 'ellipse-outline';
+        if (route.name === 'Home') iconName = 'home-outline';
+        if (route.name === 'Add') iconName = 'add';
+        if (route.name === 'Profile') iconName = 'person-outline';
 
-          let iconName: any = 'help';
-          if (route.name === 'Home')    iconName = 'home';
-          if (route.name === 'Add')     iconName = 'add';
-          if (route.name === 'Profile') iconName = 'person';
+        // Handler
+        const onPress = () => {
+          // default for Home/Profile
+          if (route.name !== 'Add') {
+            navigation.navigate(route.name);
+          } else {
+            // our custom Add handler lives in listeners above
+            navigation.emit({
+              type: 'tabPress',
+              target: route.key,
+            });
+          }
+        };
 
-          // bigger, lifted circle for Add
-          const isAdd = route.name === 'Add';
-
-          // intercept Add tab
-          const onPress = () => {
-            if (isAdd) {
-              navigation.navigate('Add', { openShoutModal: true });
-            } else {
-              navigation.navigate(route.name);
-            }
-          };
-
+        // SPECIAL: center “Add” button
+        if (route.name === 'Add') {
           return (
             <TouchableOpacity
-              key={route.key}
+              key="add"
               onPress={onPress}
-              style={[styles.tabItem, isAdd && styles.addContainer]}
+              style={styles.addButtonContainer}
+              activeOpacity={0.7}
             >
-              <Ionicons
-                name={iconName}
-                size={isAdd ? 36 : 24}
-                color={isFocused ? '#fff' : '#ccc'}
-              />
+              <View style={styles.addButton}>
+                <Ionicons name={iconName} size={28} color="#FFF" />
+              </View>
             </TouchableOpacity>
           );
-        })}
-      </View>
-    </>
+        }
+
+        // HOME and PROFILE sit to left/right
+        return (
+          <TouchableOpacity
+            key={route.name}
+            onPress={onPress}
+            style={styles.tabItem}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name={iconName}
+              size={24}
+              color={isFocused ? '#FFF' : 'rgba(255,255,255,0.6)'}
+            />
+          </TouchableOpacity>
+        );
+      })}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   tabBar: {
-    flexDirection:  'row',
-    height:         60,
-    backgroundColor:'#022B3A',
-    alignItems:     'center',
-    justifyContent: 'space-around',
-    paddingBottom:  Platform.OS === 'ios' ? 20 : 0,
+    flexDirection: 'row',
+    backgroundColor: '#2196F3',
+    height: 60,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 40,
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   tabItem: {
-    flex:           1,
-    alignItems:     'center',
+    flex: 1,
+    alignItems: 'center',
+  },
+  addButtonContainer: {
+    position: 'absolute',
+    top: -30,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  addButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#2196F3',
+    alignItems: 'center',
     justifyContent: 'center',
-  },
-  addContainer: {
-    marginTop:       -12,
-    backgroundColor: '#022B3A',
-    width:           64,
-    height:          64,
-    borderRadius:    32,
-    alignItems:      'center',
-    justifyContent:  'center',
-    shadowColor:     '#fff',
-    shadowOpacity:   0.1,
-    shadowRadius:    6,
-    shadowOffset:    { width:0, height:2 },
-    elevation:       4,
-  },
-
-  locateContainer: {
-    position:   'absolute',
-    left:       16,
-    bottom:     80,   // sits just above the tabBar
-    zIndex:     10,
-  },
-  locateButton: {
-    width:           48,
-    height:          48,
-    borderRadius:    24,
-    backgroundColor: '#fff',
-    alignItems:      'center',
-    justifyContent:  'center',
-    shadowColor:     '#000',
-    shadowOpacity:   0.1,
-    shadowRadius:    6,
-    shadowOffset:    { width:0, height:2 },
-    elevation:       4,
+    // shadow for iOS
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 4,
+    // elevation for Android
+    elevation: 5,
   },
 });
+
 
 // // src/navigation/AppTabs.tsx
 // import React from 'react';
