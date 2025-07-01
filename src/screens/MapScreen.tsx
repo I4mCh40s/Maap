@@ -1,8 +1,9 @@
 // src/screens/MapScreen.tsx
 import React, { useState, useRef, useEffect } from 'react';
 // locateMe libs
-import { TouchableOpacity } from 'react-native';
+import { TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';  // or whatever icon lib you use
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 //likes
 import { updateDoc, increment } from 'firebase/firestore';
 import { runTransaction, arrayUnion } from 'firebase/firestore';
@@ -386,6 +387,33 @@ useEffect(() => {
   // If detailShout is set, check if this user has already liked it:
   const isLiked = !!detailShout && detailShout.likedBy.includes(currentUid);
 
+  const onLikePress = async () => {
+    if (!detailShout || isLiked) return;
+    const shoutRef = doc(db, 'shouts', detailShout.id);
+    await runTransaction(db, async tx => {
+      const snap = await tx.get(shoutRef);
+      if (!snap.exists()) throw new Error('Shout not found');
+      const data = snap.data() as any;
+      const already = (data.likedBy as string[]) || [];
+      if (already.includes(auth.currentUser!.uid)) return;
+      // bump count + record who liked:
+      tx.update(shoutRef, {
+        likedBy:   arrayUnion(auth.currentUser!.uid),
+        likeCount: increment(1),
+      });
+    });
+  };
+
+  const onDeletePress = async () => {
+    if (!detailShout) return;
+    try {
+      await deleteDoc(doc(db, 'shouts', detailShout.id));
+      setDetailShout(undefined);
+    } catch (e: any) {
+      Alert.alert('Error deleting shout', e.message);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* ─── Search bar ───────────────────────────── */}
@@ -410,70 +438,78 @@ useEffect(() => {
         style={styles.webview}
       />
 
-      {/* Detail Modal */}
-      <Modal visible={!!detailShout} transparent animationType="slide">
-      <View style={styles.overlay}>
-        <View style={styles.detail}>
-          <Text style={styles.detailTitle}>
-            {detailShout?.authorName} shouted:
-          </Text>
-          <Text style={styles.detailText}>{detailShout?.text}</Text>
-          <Text style={styles.countdown}>
-            Expires in {minutesLeft} minute{minutesLeft === 1 ? '' : 's'}
-          </Text>
+      {/* ─── Detail Modal ──────────────────────────── */}
+      <Modal visible={!!detailShout} transparent animationType="fade">
+        <View style={styles.backdrop}>
+          <View style={styles.modalCard}>
 
-            {/* ← Only render when detailShout exists AND current user is owner */}
-            {detailShout && detailShout.ownerId === auth.currentUser?.uid && (
-              <Button
-                title="Delete Shout"
-                color="#D32F2F"
-                onPress={async () => {
-                  try {
-                    // Now detailShout is guaranteed non-null here
-                    await deleteDoc(doc(db, 'shouts', detailShout.id));
-                    setDetailShout(undefined);
-                  } catch (e: any) {
-                    Alert.alert('Error deleting shout', e.message);
-                  }
-                }}
-              />
-            )}
-            <Text style={{ marginTop: 8, marginBottom: 4 }}>
-              Likes: {detailShout?.likeCount ?? 0}
+            {/* close “X” button */}
+            <TouchableOpacity
+              onPress={()=> setDetailShout(undefined)}
+              style={styles.closeButton}
+            >
+              <MaterialCommunityIcons name="close" size={24} />
+            </TouchableOpacity>
+
+            {/* header: avatar + title */}
+            <View style={styles.header}>
+              <View style={styles.avatarPlaceholder}>
+                {/* if you have user photoURL use <Image> here */}
+                <Text style={styles.avatarText}>
+                  {detailShout?.authorName.charAt(0)}
+                </Text>
+              </View>
+              <Text style={styles.modalTitle}>
+                {detailShout?.authorName} shouted
+              </Text>
+            </View>
+
+            {/* the shout message */}
+            <Text style={styles.message}>
+              {detailShout?.text}
             </Text>
-            <Button
-              title={isLiked ? '👍 Liked' : '👍 Like'}
-              onPress={async () => {
-                if (!detailShout || isLiked) return;
 
-                const shoutRef = doc(db, 'shouts', detailShout.id);
-                await runTransaction(db, async tx => {
-                  const snap = await tx.get(shoutRef);
-                  if (!snap.exists()) throw new Error('Shout not found');
-                  const data = snap.data() as any;
+            {/* expires link */}
+            <TouchableOpacity>
+              <Text style={styles.expiresText}>
+                Expires in {minutesLeft} minute
+                {minutesLeft===1?'':'s'}
+              </Text>
+            </TouchableOpacity>
 
-                  // Prevent double‐likes
-                  const already = (data.likedBy as string[]) || [];
-                  if (already.includes(auth.currentUser!.uid)) return;
+            {/* action buttons */}
+            <View style={styles.actionsRow}>
+              <TouchableOpacity
+                onPress={onLikePress}
+                disabled={isLiked}
+                style={styles.actionButton}
+              >
+                <MaterialCommunityIcons
+                  name={isLiked ? 'heart' : 'heart-outline'}
+                  size={20}
+                  color={isLiked ? '#E53935' : '#333'}
+                />
+                <Text style={styles.actionLabel}>
+                  {isLiked ? 'Liked' : 'Like'}
+                </Text>
+              </TouchableOpacity>
 
-                  // Compute new radius (100 m per like)
-                  const currentRadius = (data.radius as number) || 500;
-                  const newRadius     = currentRadius + 100;
-
-                  tx.update(shoutRef, {
-                    likedBy:    arrayUnion(auth.currentUser!.uid),
-                    likeCount:  increment(1),
-                    radius:     newRadius,
-                  });
-                });
-              }}
-              disabled={isLiked}
-            />
-
-            <Button title="Close" onPress={() => setDetailShout(undefined)} />
+              {isOwner && (
+                <TouchableOpacity
+                  onPress={onDeletePress}
+                  style={[styles.actionButton, styles.deleteButton]}
+                >
+                  <MaterialCommunityIcons name="trash-can-outline" size={20} color="#E53935" />
+                  <Text style={[styles.actionLabel, { color:'#E53935' }]}>
+                    Delete
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         </View>
       </Modal>
+
 
       {/* Shout Modal */}
       <Modal visible={modalOpen} transparent animationType="slide">
@@ -544,10 +580,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 16,
   },
-  modalTitle: {
+  /* modalTitle: {
     fontSize: 18,
     marginBottom: 12,
-  },
+  }, */
   input: {
     borderWidth: 1,
     borderColor: '#CCC',
@@ -576,5 +612,70 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 8,
     marginRight: 8,
+  },
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 20,
+    position: 'relative',
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    zIndex: 10,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems:  'center',
+    marginBottom: 12,
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#EEE',
+    width: 40, height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    fontSize: 18,
+    color: '#555',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  message: {
+    fontSize: 16,
+    marginBottom: 12,
+    color: '#333',
+  },
+  expiresText: {
+    fontSize: 14,
+    color: '#5B3EFC',
+    marginBottom: 20,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems:    'center',
+  },
+  actionLabel: {
+    marginLeft: 6,
+    fontSize:   16,
+    color:      '#333',
+  },
+  deleteButton: {
+    marginLeft: 24,
   },
 });
