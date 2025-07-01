@@ -1,6 +1,6 @@
 // App.tsx
 import React, { useEffect, useState } from 'react';
-import { NavigationContainer }        from '@react-navigation/native';
+import { NavigationContainer } from '@react-navigation/native';
 import {
   createNativeStackNavigator,
   NativeStackScreenProps,
@@ -10,51 +10,68 @@ import 'firebase/compat/auth';
 
 import { auth } from './src/firebase';
 
-// Auth screens
-import LoginScreen  from './src/screens/LoginScreen';
-import SignupScreen from './src/screens/SignupScreen';
+// --- your screens ---
+import OnboardingScreen from './src/screens/OnboardingScreen';
+import LoginScreen      from './src/screens/LoginScreen';
+import SignupScreen     from './src/screens/SignupScreen';
+import AppTabs          from './src/navigation/AppTabs';
 
-// Main app tabs
-import AppTabs      from './src/navigation/AppTabs';
-
-// ----- Type definitions for your auth stack -----
-type AuthStackParamList = {
-  Login:  undefined;
-  Signup: undefined;
+// --- define the shape of your auth stack routes ---
+export type AuthStackParamList = {
+  Onboarding: undefined;
+  Login:      undefined;
+  Signup:     undefined;
 };
+
+// for typings if you ever need them:
+type OnboardingProps = NativeStackScreenProps<AuthStackParamList, 'Onboarding'>;
+// type LoginProps      = NativeStackScreenProps<AuthStackParamList, 'Login'>;
+// type SignupProps     = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const AppStack  = createNativeStackNavigator();
 
 export default function App() {
-  // 1) Track the signed-in user
-  const [user, setUser]     = useState<firebase.User | null>(null);
+  const [user, setUser]       = useState<firebase.User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // 2) Subscribe to auth state changes
+  // listen to Firebase auth state
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(u => {
+    const unsub = auth.onAuthStateChanged(u => {
       setUser(u);
       setLoading(false);
     });
-    return unsubscribe;
+    return () => unsub();
   }, []);
 
-  // 3) You can show a splash screen here if you like
+  // you could show a splash screen here
   if (loading) return null;
 
   return (
     <NavigationContainer>
       {user ? (
+        // --- logged in: show your bottom tabs ---
         <AppStack.Navigator screenOptions={{ headerShown: false }}>
-          {/* Once logged in, your bottom tabs live under "Main" */}
           <AppStack.Screen name="Main" component={AppTabs} />
         </AppStack.Navigator>
       ) : (
-        <AuthStack.Navigator screenOptions={{ headerShown: false }}>
-          {/* Unauthenticated flow */}
-          <AuthStack.Screen name="Login"  component={LoginScreen} />
-          <AuthStack.Screen name="Signup" component={SignupScreen}/>
+        // --- not logged in: onboarding → login / signup ---
+        <AuthStack.Navigator
+          initialRouteName="Onboarding"
+          screenOptions={{ headerShown: false }}
+        >
+          <AuthStack.Screen
+            name="Onboarding"
+            component={OnboardingScreen}
+          />
+          <AuthStack.Screen
+            name="Login"
+            component={LoginScreen}
+          />
+          <AuthStack.Screen
+            name="Signup"
+            component={SignupScreen}
+          />
         </AuthStack.Navigator>
       )}
     </NavigationContainer>
