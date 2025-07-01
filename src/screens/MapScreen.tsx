@@ -514,19 +514,43 @@ useEffect(() => {
     </Modal>
 
     {/* ─── New Shout Modal ───────────────────────────── */}
-    <Modal visible={modalOpen} transparent animationType="slide">
-      <View style={styles.overlay}>
-        <View style={styles.modal}>
+    <Modal visible={modalOpen} transparent animationType="fade">
+      <View style={styles.backdrop}>
+        <View style={styles.modalCard}>
+          {/* Close “X” */}
+          <TouchableOpacity
+            onPress={() => setModalOpen(false)}
+            style={styles.closeButton}
+          >
+            <MaterialCommunityIcons name="close" size={24} />
+          </TouchableOpacity>
+
           <Text style={styles.modalTitle}>Your Shout</Text>
+
           <TextInput
-            style={styles.input}
+            style={styles.messageInput}
             placeholder="What's new?"
             value={text}
             onChangeText={setText}
+            multiline
           />
-          <View style={styles.buttonsRow}>
-            <Button title="Cancel" onPress={() => setModalOpen(false)} />
-            <Button title="Shout!" onPress={onSubmit} />
+
+          <View style={styles.actionsRow}>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => setModalOpen(false)}
+            >
+              <Text style={styles.actionLabel}>Cancel</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.actionButton, styles.shoutButton]}
+              onPress={onSubmit}
+            >
+              <Text style={[styles.actionLabel, { color: '#fff' }]}>
+                Shout!
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -610,22 +634,23 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    flex:           1,
+    backgroundColor:'rgba(0,0,0,0.5)',
     justifyContent: 'center',
-    padding: 20,
+    alignItems:     'center',
   },
   modalCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    padding: 20,
-    position: 'relative',
+    width:          '90%',
+    backgroundColor:'#FFF',
+    borderRadius:   12,
+    padding:        20,
+    position:       'relative',  // so closeButton can be absolute
   },
   closeButton: {
     position: 'absolute',
-    top: 12,
-    right: 12,
-    zIndex: 10,
+    top:      12,
+    right:    12,
+    zIndex:   1,
   },
   header: {
     flexDirection: 'row',
@@ -645,8 +670,10 @@ const styles = StyleSheet.create({
     color: '#555',
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize:   20,
     fontWeight: '600',
+    marginBottom: 16,
+    textAlign:   'center',
   },
   message: {
     fontSize: 16,
@@ -659,17 +686,25 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   actionsRow: {
-    flexDirection: 'row',
+    flexDirection:  'row',
     justifyContent: 'space-between',
   },
   actionButton: {
-    flexDirection: 'row',
-    alignItems:    'center',
+    flex: 1,
+    flexDirection: 'row',       // ← lay items out in a row
+    alignItems: 'center',       // ← vertically center icon+text
+    justifyContent: 'center',
+    paddingVertical: 6,         // ← slim it down
+    paddingHorizontal: 12,      // ← give some side padding
+    backgroundColor: '#EEE',
+    borderRadius: 6,
+    marginHorizontal: 4,
   },
   actionLabel: {
-    marginLeft: 6,
-    fontSize:   16,
-    color:      '#333',
+    marginLeft: 6,              // ← space between icon & text
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
   },
   deleteButton: {
     marginLeft: 24,
@@ -707,5 +742,17 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontWeight: '600',
     fontSize: 16,
+  },
+  messageInput: {
+    borderWidth:   1,
+    borderColor:   '#DDD',
+    borderRadius:  8,
+    padding:       12,
+    minHeight:     80,
+    textAlignVertical: 'top',
+    marginBottom:  16,
+  },
+  shoutButton: {
+    backgroundColor: '#2196F3', // same blue you use elsewhere
   },
 });

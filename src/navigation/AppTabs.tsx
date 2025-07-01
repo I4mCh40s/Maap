@@ -4,6 +4,7 @@ import React from 'react';
 import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import HomeScreen from '../screens/MapScreen';
 import MapScreen from '../screens/MapScreen';
@@ -21,80 +22,51 @@ export default function AppTabs() {
   return (
     <Tab.Navigator
       screenOptions={{ headerShown: false }}
-      tabBar={props => <MyCustomTabBar {...props} />}
+      tabBar={props => <MyTabBar {...props} />}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen
-        name="Add"
-        component={MapScreen}
-        listeners={({ navigation }) => ({
-          tabPress: e => {
-            // prevent default behavior
-            e.preventDefault();
-            // re-use MapScreen but trigger the shout modal
-            navigation.navigate('Add', { openShoutModal: true });
-          },
-        })}
-      />
+      <Tab.Screen name="Home" component={MapScreen}  />
+      <Tab.Screen name="Add"  component={MapScreen}   />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );
 }
 
-function MyCustomTabBar({ state, descriptors, navigation }: any) {
+function MyTabBar({ state, navigation }) {
   return (
     <View style={styles.tabBar}>
-      {state.routes.map((route: any, index: number) => {
-        const isFocused = state.index === index;
-
-        // Decide icon per route
-        let iconName: React.ComponentProps<typeof Ionicons>['name'] = 'ellipse-outline';
-        if (route.name === 'Home') iconName = 'home-outline';
-        if (route.name === 'Add') iconName = 'add';
-        if (route.name === 'Profile') iconName = 'person-outline';
-
-        // Handler
+      {state.routes.map((route, idx) => {
+        const focused = state.index === idx;
         const onPress = () => {
-          // default for Home/Profile
-          if (route.name !== 'Add') {
-            navigation.navigate(route.name);
+          if (route.name === 'Add') {
+            navigation.navigate('Add', { openShoutModal: true });
           } else {
-            // our custom Add handler lives in listeners above
-            navigation.emit({
-              type: 'tabPress',
-              target: route.key,
-            });
+            navigation.navigate(route.name);
           }
         };
 
-        // SPECIAL: center “Add” button
+        let iconName: string;
+        if (route.name === 'Home')    iconName = 'home';
+        else if (route.name === 'Profile') iconName = 'account';
+        else iconName = 'plus';
+
+        // for the plus, we want the big pill
         if (route.name === 'Add') {
           return (
-            <TouchableOpacity
-              key="add"
-              onPress={onPress}
-              style={styles.addButtonContainer}
-              activeOpacity={0.7}
-            >
-              <View style={styles.addButton}>
-                <Ionicons name={iconName} size={28} color="#FFF" />
+            <TouchableOpacity key={route.key} onPress={onPress} style={styles.plusContainer}>
+              <View style={styles.plusButton}>
+                <MaterialCommunityIcons name="plus" size={32} color="#fff" />
               </View>
             </TouchableOpacity>
           );
         }
 
-        // HOME and PROFILE sit to left/right
+        // normal icons
         return (
-          <TouchableOpacity
-            key={route.name}
-            onPress={onPress}
-            style={styles.tabItem}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name={iconName}
+          <TouchableOpacity key={route.key} onPress={onPress} style={styles.tabButton}>
+            <MaterialCommunityIcons
+              name={iconName as any}
               size={24}
-              color={isFocused ? '#FFF' : 'rgba(255,255,255,0.6)'}
+              color={focused ? '#fff' : '#ccc'}
             />
           </TouchableOpacity>
         );
@@ -103,46 +75,42 @@ function MyCustomTabBar({ state, descriptors, navigation }: any) {
   );
 }
 
+
 const styles = StyleSheet.create({
   tabBar: {
-    flexDirection: 'row',
-    backgroundColor: '#2196F3',
-    height: 60,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 40,
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection:  'row',
+    backgroundColor: '#2196F3',    // <-- match Android Button blue
+    height:          60,
+    paddingTop:      8,
+    paddingBottom:   8,
+    alignItems:      'center',
+    justifyContent:  'space-around',
   },
-  tabItem: {
+  tabButton: {
     flex: 1,
     alignItems: 'center',
   },
-  addButtonContainer: {
-    position: 'absolute',
-    top: -30,
-    left: 0,
-    right: 0,
+  plusContainer: {
+    position:  'absolute',
+    bottom:    0,
+    left:      '50%',
+    marginLeft: -40,
+    width:     80,
     alignItems: 'center',
   },
-  addButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#2196F3',
-    alignItems: 'center',
-    justifyContent: 'center',
-    // shadow for iOS
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 4,
-    // elevation for Android
-    elevation: 5,
+  plusButton: {
+    width:            80,
+    height:           80,
+    borderRadius:     40,
+    backgroundColor:  '#2196F3',
+    alignItems:       'center',
+    justifyContent:   'center',
+    marginTop:       -30,
+    elevation:        4,
+    shadowColor:     '#000',
+    shadowOpacity:   0.3,
+    shadowOffset:    { width: 0, height: 2 },
+    shadowRadius:    4,
   },
 });
 
