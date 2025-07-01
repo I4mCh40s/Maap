@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';  // or whatever icon lib you use
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
 //likes
 import { updateDoc, increment } from 'firebase/firestore';
 import { runTransaction, arrayUnion } from 'firebase/firestore';
@@ -53,6 +54,8 @@ type Shout = {
 };
 
 export default function MapScreen({ route, navigation }: any) {
+  // goal for likes
+  const GOAL_LIKES = 10;
   // 0) Helper: compute distance in meters between two lat/lng pairs
   function getDistanceMeters(
     lat1: number, lon1: number,
@@ -437,6 +440,14 @@ useEffect(() => {
         <Text style={styles.searchButtonText}>GO</Text>
       </TouchableOpacity>
     </View>
+    
+    {/* ─── Locate-Me Button ────────────────────────── */}
+      <TouchableOpacity
+        style={styles.locateButton}
+        onPress={locateMe}
+      >
+        <MaterialIcons name="my-location" size={24} color="#333" />
+      </TouchableOpacity>
 
     {/* ─── Map / WebView ──────────────────────────────── */}
     <WebView
@@ -480,6 +491,31 @@ useEffect(() => {
             <Text style={styles.expiresText}>
               Expires in {minutesLeft} minute{minutesLeft === 1 ? '' : 's'}
             </Text>
+            
+            {/* ─── mini progress bar ─────────────────── */}
+            <View style={styles.progressContainer}>
+              {/* background track */}
+              <View style={styles.progressBarBackground}>
+                {/* colored fill: width = (likes / GOAL) * 100% */}
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    {
+                      width: `${Math.min(
+                        (detailShout?.likeCount ?? 0) / GOAL_LIKES * 100,
+                        100
+                      )}%`,
+                    },
+                  ]}
+                />
+              </View>
+
+              {/* label on the right */}
+              <Text style={styles.progressLabel}>
+                {Math.min(detailShout?.likeCount ?? 0, GOAL_LIKES)}/{GOAL_LIKES} Likes
+              </Text>
+            </View>
+
           </TouchableOpacity>
 
           {/* actions: like / delete */}
@@ -565,6 +601,10 @@ useEffect(() => {
 
   );
 }
+
+const barHeight = Platform.OS === 'android'
+  ? (StatusBar.currentHeight ?? 0)
+  : 0;
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -760,5 +800,53 @@ const styles = StyleSheet.create({
   },
   shoutButton: {
     backgroundColor: '#2196F3', // same blue you use elsewhere
+  },
+  progressBarContainer: {
+  width:          '100%',
+  height:         6,
+  backgroundColor:'#EEE',
+  borderRadius:   3,
+  overflow:       'hidden',
+  marginVertical: 8,
+},
+progressBarFill: {
+  height:         6,
+  backgroundColor:'#5B3EFC',
+},
+progressLabel: {
+  fontSize: 12,
+  color:    '#555',
+  textAlign:'right',
+  marginBottom: 4,
+},
+progressContainer: {
+    marginVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  progressBarBackground: {
+    flex: 1,
+    height: 6,
+    backgroundColor: '#EEE',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginRight: 8,
+  },
+  locateButton: {
+    position: 'absolute',
+    bottom: 100,
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,            // Android shadow
+    shadowColor: '#000',     // iOS shadow
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 3,
+    zIndex: 10,
   },
 });
