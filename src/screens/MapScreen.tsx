@@ -76,7 +76,11 @@ export default function MapScreen({ route, navigation }: any) {
   // ─── your existing state hooks ────────────────────────────
   const wv = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
-  const [coords, setCoords] = useState<{ lat: number; lng: number }>();
+  // the user’s *actual* location
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+  // the point we want the map to center on (either user or a searched location)
+  const [mapCenter, setMapCenter]   = useState<{ lat: number; lng: number } | null>(null);
+
   const [address, setAddress] = useState('');
   const [shouts, setShouts] = useState<Shout[]>([]);
 
@@ -117,7 +121,10 @@ useEffect(() => {
       return;
     }
     const pos = await Location.getCurrentPositionAsync({});
-    setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+    const { latitude: lat, longitude: lng } = pos.coords;
+    // now we have lat/lng in scope
+    setUserCoords({ lat, lng });
+    setMapCenter({ lat, lng });
     const [place] = await Location.reverseGeocodeAsync(pos.coords);
     setAddress([place.city, place.region].filter(Boolean).join(', '));
   })();
@@ -165,26 +172,29 @@ useEffect(() => {
   // 4) Push updated shouts into the WebView
   useEffect(() => {
     // wait until either real coords or a searchCenter exist
-    if (!ready || (!coords && !searchCenter)) return;
-    const { lat: userLat, lng: userLng } = searchCenter ?? coords!;
+    if (!ready || !userCoords) return;
+    const { lat: userLat, lng: userLng } = userCoords;
     
-    // ➊ bounding‐box pre‐filter:
+    // ② first, a cheap bounding-box prefilter  
     const maybe = shouts.filter(s => {
-    // 1° lat ≈ 111320 m
+    // 1° of lat ≈ 111 320 m
     const latDelta = s.radius / 111_320;
-    // 1° lng ≈ 111320 m * cos(latitude)
-    const lngDelta =
-      s.radius / (111_320 * Math.cos(s.lat * Math.PI / 180));
+    // 1° of lng ≈ 111 320 m * cos(latitude)  (we’ll use the user’s latitude here)
+    const lngDelta = s.radius / (111_320 * Math.cos(userLat * Math.PI / 180));
+
     return (
       Math.abs(userLat - s.lat) <= latDelta &&
       Math.abs(userLng - s.lng) <= lngDelta
     );
- });
+  });
 
-  // ➋ on that small set, do the precise check:
-  const visible = maybe.filter(s =>
-    getDistanceMeters(userLat, userLng, s.lat, s.lng) <= s.radius
-  );
+  // ③ now do the exact circle-intersection check
+  const visible = maybe.filter(s => {
+    // if your shout has a .radius in meters
+    return (
+      getDistanceMeters(userLat, userLng, s.lat, s.lng) <= s.radius
+    );
+  });
 
     const payload = JSON.stringify({
       type: 'shouts',
@@ -206,7 +216,7 @@ useEffect(() => {
       true;
     `;
     wv.current?.injectJavaScript(jsToInject);
-  }, [ready, shouts, coords, searchCenter]);
+  }, [ready, shouts, userCoords]);
 
   // 5) Submit a new text shout
   async function onSubmit() {
@@ -214,13 +224,13 @@ useEffect(() => {
       Alert.alert('Please enter a message');
       return;
     }
-    if (!coords) return;
+    if (!userCoords) return;
 
     await addDoc(collection(db, 'shouts'), {
       text: text.trim(),
       authorName: auth.currentUser?.displayName || 'Anonymous',
       ownerId: auth.currentUser?.uid,          // ← include ownerId on create
-      location: new GeoPoint(coords.lat, coords.lng),
+      location: new GeoPoint(userCoords.lat, userCoords.lng),
       createdAt: serverTimestamp(),
       likeCount: 0,
       likedBy: [] as string[],
@@ -261,7 +271,7 @@ useEffect(() => {
   const map = tt.map({
     key: '${TOMTOM_KEY}',
     container: 'map',
-    center: [${coords?.lng}, ${coords?.lat}],
+    center: [${mapCenter?.lng}, ${mapCenter?.lat}],
     zoom: 14,
     style: "https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAMzJSMkJDa1NmTGNvR2h3RzsO9cOMFdVDGI-DPwgg0BlM.json?key=${TOMTOM_KEY}" // <--- UPDATED LINE
   });
@@ -270,7 +280,7 @@ useEffect(() => {
   const userEl = document.createElement('div');
   userEl.className = 'user-marker';
   new tt.Marker({ element: userEl })
-    .setLngLat([${coords?.lng}, ${coords?.lat}])
+    .setLngLat([${userCoords?.lng}, ${userCoords?.lat}])
     .addTo(map);                              
   
   let markers = [];
@@ -327,7 +337,7 @@ useEffect(() => {
 
 </body></html>`;
 
-  if (!coords) {
+  if (!userCoords) {
     return (
       <SafeAreaView style={styles.loading}>
         <ActivityIndicator size="large" />
@@ -348,11 +358,11 @@ useEffect(() => {
 
   // locateMe button
   async function locateMe() {
-  if (!coords) return;
+  if (!userCoords) return;
   // just fetch a new one, no need to re-ask permission:
   const pos = await Location.getCurrentPositionAsync({});
   const { latitude, longitude } = pos.coords;
-  setCoords({ lat: latitude, lng: longitude });
+  setUserCoords({ lat: latitude, lng: longitude });
 
   // tell the WebView to recenter…
   const js = `
