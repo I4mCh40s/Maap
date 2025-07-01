@@ -190,7 +190,8 @@ useEffect(() => {
       text:      s.text,
       lat:       s.lat,
       lng:       s.lng,
-      createdAt: s.createdAt
+      createdAt: s.createdAt,
+      likeCount: s.likeCount  || 0,
     })),
   });
     const jsToInject = `
@@ -248,8 +249,8 @@ useEffect(() => {
   <link href="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps.css" rel="stylesheet"/>
   <style>
     html,body,#map {margin:0;padding:0;width:100%;height:100%}
-    .marker {width:20px;height:20px;border:2px solid #FFF;border-radius:50%;cursor:pointer;}
-    .user-marker {width: 16px; height: 16px; background: rgba(0,150,136,0.8); border: 2px solid #FFF; border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,0.3); transform: translate(-8px, -8px);}
+    .marker {width:20px;height:20px;background: #5B3EFC;border:2px solid #FFF;border-radius:50%;cursor:pointer;transform: translate(-50%, -50%);z-index: 2;}
+    .user-marker {width: 16px; height: 16px; background: rgba(0,150,136,0.8); border: 2px solid #FFF; border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,0.3); transform: translate(-50%, -50%);z-index: 1; }
   </style>
 </head><body>
   <div id="map"></div>
@@ -276,28 +277,33 @@ useEffect(() => {
   }
 
   function addMarkers(shouts) {
-    clearMarkers();
-    const now = Date.now();
-    shouts.forEach(s => {
-      const ageMs = now - s.createdAt;
-      const leftMin = Math.max(0, Math.ceil((60 * 60 * 1000 - ageMs) / 60000));
-      const color = leftMin <= 10 ? '#E53935' : '#5B3EFC';
+      clearMarkers();
+      const now = Date.now();
 
-      const el = document.createElement('div');
-      el.className = 'marker';
-      el.style.backgroundColor = color;
-      el.onclick = () => {
-        window.ReactNativeWebView.postMessage(
-          JSON.stringify({ type: 'shoutTap', id: s.id })
-        );
-      };
+      shouts.forEach(s => {
+        const likes = s.likeCount || 0;
+        const size  = 20 + Math.sqrt(likes) * 5;
 
-      const m = new tt.Marker({ element: el })
-        .setLngLat([s.lng, s.lat])
-        .addTo(map);
-      markers.push(m);
-    });
-  }
+        const el = document.createElement('div');
+        el.className = 'marker';
+        // use string concatenation instead of
+        el.style.width        = size + 'px';
+        el.style.height       = size + 'px';
+        el.style.borderRadius = (size/2) + 'px';
+        el.style.transform    = 'translate(' + (-size/2) + 'px, ' + (-size/2) + 'px)';
+
+        el.onclick = () => {
+          window.ReactNativeWebView.postMessage(
+            JSON.stringify({ type:'shoutTap', id: s.id })
+          );
+        };
+
+        const m = new tt.Marker({ element: el })
+          .setLngLat([s.lng, s.lat])
+          .addTo(map);
+        markers.push(m);
+      });
+    }
 
   // ← New unified handler for messages from React Native
   function handleMsg(e) {
