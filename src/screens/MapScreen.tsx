@@ -469,6 +469,7 @@ useEffect(() => {
 
     {/* ─── Detail “Shout” Modal ───────────────────────── */}
     <Modal visible={!!detailShout} transparent animationType="fade">
+      <View style={StyleSheet.absoluteFill}>
       <View style={styles.backdrop}>
         <View style={styles.modalCard}>
           {/* close “X” */}
@@ -560,11 +561,13 @@ useEffect(() => {
             )}
           </View>
         </View>
+        </View>
       </View>
     </Modal>
 
     {/* ─── New Shout Modal ───────────────────────────── */}
     <Modal visible={modalOpen} transparent animationType="fade">
+      <View style={StyleSheet.absoluteFill}>
       <View style={styles.backdrop}>
         <View style={styles.modalCard}>
           {/* Close “X” */}
@@ -604,6 +607,7 @@ useEffect(() => {
           </View>
         </View>
       </View>
+      </View>
     </Modal>
   </SafeAreaView>
 
@@ -615,7 +619,7 @@ const barHeight = Platform.OS === 'android'
   : 0;
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0, },
   loading: {
     flex: 1,
     justifyContent: 'center',
@@ -687,7 +691,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: 'transparent',
   },
+  
   backdrop: {
+    ...StyleSheet.absoluteFillObject,
     flex:           1,
     backgroundColor:'rgba(0,0,0,0.5)',
     justifyContent: 'center',
