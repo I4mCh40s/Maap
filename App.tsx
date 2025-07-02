@@ -5,6 +5,7 @@ import {
   createNativeStackNavigator,
   NativeStackScreenProps,
 } from '@react-navigation/native-stack';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 
@@ -48,6 +49,7 @@ export default function App() {
   if (loading) return null;
 
   return (
+    <SafeAreaProvider>
     <NavigationContainer>
       {user ? (
         // --- logged in: show your bottom tabs ---
@@ -75,5 +77,6 @@ export default function App() {
         </AuthStack.Navigator>
       )}
     </NavigationContainer>
+    </SafeAreaProvider>
   );
 }
