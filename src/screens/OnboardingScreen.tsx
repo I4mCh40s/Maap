@@ -23,7 +23,7 @@ export default function OnboardingScreen({ navigation }: Props) {
     <View style={styles.container}>
       {/* You can swap out the image below for a real asset */}
       <Image
-        source={require('../assets/onboard-illustration.png')}
+        source={require('../assets/mascot.png')}
         style={styles.image}
         resizeMode="contain"
       />

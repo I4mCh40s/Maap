@@ -24,6 +24,24 @@ export default function AppTabs() {
       screenOptions={{ headerShown: false }}
       tabBar={props => <MyTabBar {...props} />}
     >
+    
+    {/* <Tab.Navigator 
+    //   screenOptions={{ headerShown: false }}
+    //   tabBar={props => (
+    //     // wrap the bar in a View that adds a little bottom‐padding on Android
+    //     <View
+    //       style={{
+    //         paddingBottom: Platform.OS === 'android' ? 24 : 0,
+    //         // if MyTabBar has its own background, you don't need this;
+    //         // otherwise uncomment to give it the same color:
+    //         // backgroundColor: '#012A38',
+    //       }}
+    //     >
+    //       <MyTabBar {...props} />
+    //     </View>
+    //   )}
+    // >
+    {/* delete up */}
       <Tab.Screen name="Home" component={MapScreen}  />
       <Tab.Screen name="Add"  component={MapScreen}   />
       <Tab.Screen name="Profile" component={ProfileScreen} />

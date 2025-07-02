@@ -10,8 +10,6 @@ import { updateDoc, increment } from 'firebase/firestore';
 import { runTransaction, arrayUnion } from 'firebase/firestore';
 import shared from '../components/SharedStyles'
 
-
-
 import {
   SafeAreaView,
   View,
