@@ -1,99 +1,106 @@
 // src/navigation/AppTabs.tsx
 import React from 'react';
-import {
-  View,
-  TouchableOpacity,
-  StyleSheet,
-} from 'react-native';
-import {
-    SafeAreaView,
-} from 'react-native-safe-area-context';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { View, TouchableOpacity, StyleSheet } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets }   from 'react-native-safe-area-context';
+import { createBottomTabNavigator }           from '@react-navigation/bottom-tabs';
+import { createNativeStackNavigator }         from '@react-navigation/native-stack';
+import { MaterialCommunityIcons }             from '@expo/vector-icons';
 
-
-import HomeScreen from '../screens/MapScreen';
-import ProfileScreen from '../screens/ProfileScreen';
+import MapScreen      from '../screens/MapScreen';
+import SpinScreen     from '../screens/SpinScreen';
+import ProfileScreen  from '../screens/ProfileScreen';
 
 type TabParamList = {
-  Home: undefined;
-  Add: { openShoutModal?: boolean };
+  Home: {     // now Home can accept a nested navigation instruction
+    screen?: 'Map';
+    params?: { openShoutModal?: boolean };
+  };
+  Add: undefined;
   Profile: undefined;
 };
-type IconName = React.ComponentProps<
-  typeof MaterialCommunityIcons
->['name'];
-const Tab = createBottomTabNavigator<TabParamList>();
+
+const Tab       = createBottomTabNavigator<TabParamList>();
+const HomeStack = createNativeStackNavigator();
+
+function HomeStackScreen() {
+  return (
+    <HomeStack.Navigator screenOptions={{ headerShown: false }}>
+      <HomeStack.Screen 
+        name="Map" 
+        component={MapScreen} 
+        initialParams={{ openShoutModal: false }}
+      />
+      <HomeStack.Screen 
+        name="PowerUp" 
+        component={SpinScreen} 
+        options={{ presentation: 'modal' }}
+      />
+    </HomeStack.Navigator>
+  );
+}
 
 export default function AppTabs() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tab.Navigator
-      screenOptions={{ headerShown: false }}
-      tabBar={props => <MyTabBar {...props} />}
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: '#2196F3',
+          borderTopWidth: 0,
+          paddingBottom: insets.bottom,
+          height:        56 + insets.bottom,
+        },
+        tabBarActiveTintColor:   '#fff',
+        tabBarInactiveTintColor: '#888',
+      }}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Add" component={HomeScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      {/* Home Tab */}
+      <Tab.Screen
+        name="Home"
+        component={HomeStackScreen}
+        options={{
+          tabBarIcon: ({ color }) => (
+            <MaterialCommunityIcons name="home" size={24} color={color} />
+          ),
+        }}
+      />
+
+      {/* Add Tab: same stack, but will trigger the modal via params */}
+      <Tab.Screen
+        name="Add"
+        component={HomeStackScreen}
+        listeners={({ navigation }) => ({
+          tabPress: e => {
+            // Prevent default behavior
+            e.preventDefault();
+            // Navigate into the HomeStack, open the shout modal
+            navigation.navigate('Home', { screen: 'Map', params: { openShoutModal: true } });
+          },
+        })}
+        options={{
+          tabBarIcon: ({ color }) => (
+            <MaterialCommunityIcons name="plus-circle" size={32} color={color} />
+          ),
+        }}
+      />
+
+      {/* Profile Tab */}
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          tabBarIcon: ({ color }) => (
+            <MaterialCommunityIcons name="account" size={24} color={color} />
+          ),
+        }}
+      />
     </Tab.Navigator>
   );
 }
 
-function MyTabBar({ state, navigation }) {
-  return (
-    // SafeAreaView will automatically handle the bottom padding.
-    <SafeAreaView edges={['bottom']} style={styles.safeArea}>
-      {/* The redundant paddingBottom style has been removed from this View. */}
-      <View style={styles.tabBar}>
-        {state.routes.map((route, idx) => {
-          const focused = state.index === idx;
-          const onPress = () => {
-            if (route.name === 'Add') {
-              navigation.navigate('Add', { openShoutModal: true });
-            } else {
-              navigation.navigate(route.name);
-            }
-          };
 
-          // special “+” pill
-          if (route.name === 'Add') {
-            return (
-              <TouchableOpacity
-                key={route.key}
-                onPress={onPress}
-                activeOpacity={0.8}
-                style={styles.plusTouch}
-              >
-                <View style={styles.plusCircle}>
-                  <MaterialCommunityIcons
-                    name="plus"
-                    size={32}
-                    color="#fff"
-                  />
-                </View>
-              </TouchableOpacity>
-            );
-          }
-
-          // normal icons
-          const iconName: IconName = route.name === 'Home' ? 'home' : 'account';
-          return (
-            <TouchableOpacity
-              key={route.key}
-              onPress={onPress}
-              style={styles.tabButton}
-            >
-              <MaterialCommunityIcons
-                name={iconName}
-                size={24}
-                color={focused ? '#fff' : '#888'}
-              />
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </SafeAreaView>
-  );
-}
 
 const styles = StyleSheet.create({
   tabBar: {

@@ -1,22 +1,12 @@
 // src/screens/MapScreen.tsx
 import React, { useState, useRef, useEffect } from 'react';
-// locateMe libs
-import { TouchableOpacity, Image } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';  // or whatever icon lib you use
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { MaterialIcons } from '@expo/vector-icons';
-//likes
-import { updateDoc, increment } from 'firebase/firestore';
-import { runTransaction, arrayUnion } from 'firebase/firestore';
-import shared from '../components/SharedStyles'
-
 import {
   SafeAreaView,
   View,
   Text,
   Modal,
   TextInput,
-  Button,
+  TouchableOpacity,
   Alert,
   StyleSheet,
   ActivityIndicator,
@@ -25,6 +15,7 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
+import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 
 import {
   collection,
@@ -33,10 +24,30 @@ import {
   serverTimestamp,
   GeoPoint,
   deleteDoc,
-  doc,               // ← import doc here
+  doc,
   Timestamp,
+  runTransaction,
+  arrayUnion,
+  increment,
+  updateDoc,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+
+function getDistanceMeters(
+  lat1: number, lon1: number,
+  lat2: number, lon2: number
+): number {
+  const toRad = (x: number) => x * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const R = 6371000; // earth radius in meters
+  return R * c;
+}
 
 type Shout = {
   id: string;
@@ -44,155 +55,121 @@ type Shout = {
   lat: number;
   lng: number;
   authorName: string;
-  ownerId: string;       // ← added
-  createdAt: number;     // millis since epoch
+  ownerId: string;
+  createdAt: number;
   likeCount: number;
   likedBy: string[];
-  radius: number; 
+  radius: number;
 };
 
-export default function MapScreen({ route, navigation }: any) {
-  // goal for likes
-  const GOAL_LIKES = 10;
-  // 0) Helper: compute distance in meters between two lat/lng pairs
-  function getDistanceMeters(
-    lat1: number, lon1: number,
-    lat2: number, lon2: number
-  ): number {
-    const toRad = (v: number) => (v * Math.PI) / 180;
-    const R = 6371000; // Earth radius (m)
-    const φ1 = toRad(lat1), φ2 = toRad(lat2);
-    const Δφ = toRad(lat2 - lat1), Δλ = toRad(lon2 - lon1);
-    const a =
-      Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-      Math.cos(φ1)*Math.cos(φ2) *
-      Math.sin(Δλ/2)*Math.sin(Δλ/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-  }
+// If you added "streakBonus" at Spin time, include it here:
+export type PowerUpType =
+  | 'megaphone'
+  | 'echo'
+  | 'streakBonus'   // ← make sure this matches your SpinScreen
+  | /* etc… */ string;
 
-  // ─── your existing state hooks ────────────────────────────
+export default function MapScreen({ route, navigation }: any) {
+  const GOAL_LIKES = 10;
+
+  // 0) Helpers…
   const wv = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
-  // the user’s *actual* location
-  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
-  // the point we want the map to center on (either user or a searched location)
-  const [mapCenter, setMapCenter]   = useState<{ lat: number; lng: number } | null>(null);
-
+  const [userCoords, setUserCoords] = useState<{lat:number,lng:number}|null>(null);
+  const [mapCenter, setMapCenter] = useState<{lat:number,lng:number}|null>(null);
   const [address, setAddress] = useState('');
   const [shouts, setShouts] = useState<Shout[]>([]);
 
+  // text/shout‐creation state
   const [modalOpen, setModalOpen] = useState(false);
   const [text, setText] = useState('');
-  const [detailShout, setDetailShout] = useState<Shout>();
 
-  // ▶️ location-search state
-  const [searchQuery, setSearchQuery]     = useState('');
-  const [searchCenter, setSearchCenter]   = useState<{lat:number;lng:number} | null>(null);
+  // DETAIL modal state now explicitly Shout|null
+  const [detailShout, setDetailShout] = useState<Shout|null>(null);
 
-  // 1) Auto-open modal if requested
+  // search state
+  const [searchQuery, setSearchQuery] = useState('');
+  // … location-search center, power-up, etc …
+
+  // 1a) Open Shout Modal effect
   useEffect(() => {
-  // grab our two boolean flags without clobbering your function names
-  const { openShoutModal, shouldRecenter } = route.params || {};
-
-  // 1) If the "+" button was tapped…
-  if (openShoutModal) {
-    setModalOpen(true);
-    // clear so next tap can fire again
-    navigation.setParams({ openShoutModal: false });
-  }
-
-  // 2) If the locate‐me button was tapped…
-  if (shouldRecenter) {
-    locateMe();  // ← your existing function that requests position & injects JS
-    navigation.setParams({ shouldRecenter: false });
-  }
-  }, [route.params, navigation]);
-
-  // 2) Get user location + reverse-geocode
-  // runs just once, on component mount
-useEffect(() => {
-  (async () => {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'This app needs location access.');
-      return;
+    if (route.params?.openShoutModal) {
+      setModalOpen(true);
+      navigation.setParams({ openShoutModal: false });
     }
-    const pos = await Location.getCurrentPositionAsync({});
-    const { latitude: lat, longitude: lng } = pos.coords;
-    // now we have lat/lng in scope
-    setUserCoords({ lat, lng });
-    setMapCenter({ lat, lng });
-    const [place] = await Location.reverseGeocodeAsync(pos.coords);
-    setAddress([place.city, place.region].filter(Boolean).join(', '));
-  })();
+  }, [route.params?.openShoutModal, navigation]);
+
+  // 1b) Recenter effect
+  useEffect(() => {
+    if (route.params?.shouldRecenter) {
+      locateMe();
+      navigation.setParams({ shouldRecenter: false });
+    }
+  }, [route.params?.shouldRecenter, navigation]);
+
+  // 2) initial user loc + reverse‐geocode
+  useEffect(() => {
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        return Alert.alert('Permission required', 'This app needs location access.');
+      }
+      const pos = await Location.getCurrentPositionAsync({});
+      const { latitude: lat, longitude: lng } = pos.coords;
+      setUserCoords({lat,lng});
+      setMapCenter({lat,lng});
+      const [place] = await Location.reverseGeocodeAsync(pos.coords);
+      setAddress([place.city, place.region].filter(Boolean).join(', '));
+    })();
   }, []);
 
-
-  // 3) Subscribe to shouts, include metadata, clean up >60 min
+  // 3) subscribe + TTL cleanup
   useEffect(() => {
-    const unsub = onSnapshot(
-      collection(db, 'shouts'),
-      { includeMetadataChanges: true },
-      snap => {
-        const now = Date.now();
-        const valid: Shout[] = [];
-
-        snap.docs.forEach(d => {
-          const data = d.data() as any;
-          const ts = (data.createdAt as Timestamp)?.toMillis() ?? now;
-
-          if (now - ts > 60 * 60 * 1000) {
-            deleteDoc(d.ref);
-          } else {
-            valid.push({
-              id: d.id,
-              text: data.text,
-              lat: data.location.latitude,
-              lng: data.location.longitude,
-              authorName: data.authorName || 'Anonymous',
-              ownerId: data.ownerId,           // ← capture ownerId here
-              likeCount: data.likeCount || 0,   // ← grab it from Firestore
-              likedBy: data.likedBy || [],
-              radius:     data.radius     || 500,
-              createdAt: ts,
-            });
-          }
-        });
-
-        setShouts(valid);
-      }
-    );
-
+    const unsub = onSnapshot(collection(db, 'shouts'), snap => {
+      const now = Date.now();
+      const valid: Shout[] = [];
+      snap.docs.forEach(d => {
+        const data = d.data() as any;
+        const ts = (data.createdAt as Timestamp)?.toMillis() ?? now;
+        if (now - ts > 60*60*1000) {
+          deleteDoc(d.ref);
+        } else {
+          valid.push({
+            id: d.id,
+            text: data.text,
+            lat: data.location.latitude,
+            lng: data.location.longitude,
+            authorName: data.authorName||'Anonymous',
+            ownerId: data.ownerId,
+            createdAt: ts,
+            likeCount: data.likeCount||0,
+            likedBy: data.likedBy||[],
+            radius: data.radius||500,
+          });
+        }
+      });
+      setShouts(valid);
+    });
     return unsub;
   }, []);
 
-  // 4) Push updated shouts into the WebView
+  // 4) send “visible” shouts to WebView
   useEffect(() => {
-    // wait until either real coords or a searchCenter exist
     if (!ready || !userCoords) return;
-    const { lat: userLat, lng: userLng } = userCoords;
-    
-    // ② first, a cheap bounding-box prefilter  
+    const { lat: uLat, lng: uLng } = userCoords;
+
+    // bounding‐box prefilter
     const maybe = shouts.filter(s => {
-    // 1° of lat ≈ 111 320 m
-    const latDelta = s.radius / 111_320;
-    // 1° of lng ≈ 111 320 m * cos(latitude)  (we’ll use the user’s latitude here)
-    const lngDelta = s.radius / (111_320 * Math.cos(userLat * Math.PI / 180));
+      const latDelta = s.radius / 111_320;
+      const lngDelta = s.radius / (111_320 * Math.cos(uLat * Math.PI/180));
+      return Math.abs(uLat - s.lat) <= latDelta
+          && Math.abs(uLng - s.lng) <= lngDelta;
+    });
 
-    return (
-      Math.abs(userLat - s.lat) <= latDelta &&
-      Math.abs(userLng - s.lng) <= lngDelta
+    // exact circle check
+    const visible = maybe.filter(s =>
+      getDistanceMeters(uLat, uLng, s.lat, s.lng) <= s.radius
     );
-  });
-
-  // ③ now do the exact circle-intersection check
-  const visible = maybe.filter(s => {
-    // if your shout has a .radius in meters
-    return (
-      getDistanceMeters(userLat, userLng, s.lat, s.lng) <= s.radius
-    );
-  });
 
     const payload = JSON.stringify({
       type: 'shouts',
@@ -382,7 +359,7 @@ useEffect(() => {
       const pos  = json.results?.[0]?.position;
       if (pos) {
         // ➊ remember the new center
-        setSearchCenter({ lat: pos.lat, lng: pos.lon });
+        setMapCenter({ lat: pos.lat, lng: pos.lon });
         // ➋ update your address bar to show the query
         setAddress(searchQuery);
         // ➌ inject JS so the WebView map recenters
@@ -407,26 +384,27 @@ useEffect(() => {
 
   const onLikePress = async () => {
     if (!detailShout || isLiked) return;
-    const shoutRef = doc(db, 'shouts', detailShout.id);
+    const r = doc(db,'shouts',detailShout.id);
     await runTransaction(db, async tx => {
-      const snap = await tx.get(shoutRef);
-      if (!snap.exists()) throw new Error('Shout not found');
+      const snap = await tx.get(r);
       const data = snap.data() as any;
-      const already = (data.likedBy as string[]) || [];
-      if (already.includes(auth.currentUser!.uid)) return;
-      // bump count + record who liked:
-      tx.update(shoutRef, {
-        likedBy:   arrayUnion(auth.currentUser!.uid),
-        likeCount: increment(1),
+      if ((data.likedBy||[]).includes(currentUid)) return;
+      tx.update(r, {
+        likedBy:   arrayUnion(currentUid),
+        likeCount: increment(1)
       });
     });
+    // **optimistic update** so UI flips immediately:
+    setDetailShout(d => d
+      ? {...d, likeCount: d.likeCount+1, likedBy: [...d.likedBy,currentUid]}
+      : d
+    );
   };
-
   const onDeletePress = async () => {
     if (!detailShout) return;
     try {
       await deleteDoc(doc(db, 'shouts', detailShout.id));
-      setDetailShout(undefined);
+      setDetailShout(null);
     } catch (e: any) {
       Alert.alert('Error deleting shout', e.message);
     }
@@ -434,6 +412,16 @@ useEffect(() => {
 
   return (
     <SafeAreaView style={styles.container}>
+
+    {/* ─── Map / WebView ──────────────────────────────── */}
+    <WebView
+      ref={wv}
+      source={{ html }}
+      originWhitelist={['*']}
+      onLoadEnd={() => setReady(true)}
+      onMessage={onWebMessage}
+      style={styles.webview}
+    />
     {/* ─── Floating Search Pill ───────────────────────── */}
     <View style={styles.searchBar}>
       <TextInput
@@ -457,15 +445,19 @@ useEffect(() => {
         <MaterialIcons name="my-location" size={24} color="#333" />
       </TouchableOpacity>
 
-    {/* ─── Map / WebView ──────────────────────────────── */}
-    <WebView
-      ref={wv}
-      source={{ html }}
-      originWhitelist={['*']}
-      onLoadEnd={() => setReady(true)}
-      onMessage={onWebMessage}
-      style={styles.webview}
-    />
+      {/* ─── Spin Button ────────────────────────── */}
+      <TouchableOpacity
+        onPress={() => navigation.navigate('PowerUp')}
+        style={styles.spinButton}
+      >
+      <MaterialCommunityIcons
+        name="dice-multiple"
+        size={24}
+        color="#fff"
+      />
+      </TouchableOpacity>
+
+    
 
     {/* ─── Detail “Shout” Modal ───────────────────────── */}
     <Modal visible={!!detailShout} transparent animationType="fade">
@@ -474,7 +466,7 @@ useEffect(() => {
         <View style={styles.modalCard}>
           {/* close “X” */}
           <TouchableOpacity
-            onPress={() => setDetailShout(undefined)}
+            onPress={() => setDetailShout(null)}
             style={styles.closeButton}
           >
             <MaterialCommunityIcons name="close" size={24} />
@@ -631,7 +623,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: '#EEE',
   },
-  webview: { flex: 1 },
+  webview: {
+    position: 'absolute',
+    top:      0,
+    bottom:   0,
+    left:     0,
+    right:    0,
+    zIndex:   0,      // explicitly low
+  },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -850,9 +849,9 @@ progressContainer: {
     position: 'absolute',
     bottom: 100,
     right: 16,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
@@ -863,4 +862,22 @@ progressContainer: {
     shadowRadius: 3,
     zIndex: 10,
   },
+  spinButton: {
+  position:   'absolute',
+  bottom:     100,     // just above your + button
+  left:       16,
+  
+  width:      48,
+  height:     48,
+  borderRadius: 24,
+  backgroundColor: '#5B3EFC',
+  justifyContent:  'center',
+  alignItems:     'center',
+  elevation:      5,  // Android shadow
+  shadowColor:   '#000',
+  shadowOpacity: 0.25,
+  shadowRadius:  4,
+  shadowOffset:  { width: 0, height: 2 },
+},
+
 });
