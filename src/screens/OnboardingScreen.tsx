@@ -6,10 +6,12 @@ import {
   StyleSheet,
   Image,
   Button,
+  TouchableOpacity
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../../App'; // adjust path if needed
+import shared from '../components/SharedStyles'
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Onboarding'>;
 
@@ -31,12 +33,15 @@ export default function OnboardingScreen({ navigation }: Props) {
       <Text style={styles.title}>Welcome to Maap</Text>
       <Text style={styles.subtitle}>
         Tap the “+” button to shout your message to everyone within 500 m.  
-        Replies, likes, and shares will expand your reach!
+        Likes, and daily power-ups will expand your reach!
       </Text>
 
-      <View style={styles.button}>
+      <TouchableOpacity style={[shared.button, { width: '80%' }]} onPress={finish}>
+          <Text style={shared.buttonText}>Get started</Text>
+      </TouchableOpacity>
+      {/* <View style={styles.button}>
         <Button title="Get started" onPress={finish} />
-      </View>
+      </View> */}
     </View>
   );
 }
@@ -67,7 +72,5 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     lineHeight: 22,
   },
-  button: {
-    width: '60%',
-  },
+  
 });
