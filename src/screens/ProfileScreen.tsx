@@ -41,6 +41,7 @@ export default function ProfileScreen() {
   const [shouts,     setShouts]    = useState<ShoutItem[]>([])
   const [loading,    setLoading]   = useState(true)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
 
   // show any fetch errors once, then clear
   useEffect(() => {
@@ -90,6 +91,11 @@ export default function ProfileScreen() {
     } catch (e: any) {
       Alert.alert('Logout failed', e.message)
     }
+  }
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 600);
   }
 
   function renderShout({ item }: { item: ShoutItem }) {
@@ -205,6 +211,8 @@ export default function ProfileScreen() {
             renderItem={renderShout}
             keyExtractor={s => s.id}
             contentContainerStyle={{ paddingBottom: 32 }}
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
           />
         )}
       </View>
