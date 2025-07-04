@@ -689,15 +689,9 @@ export default function MapScreen({ route, navigation }: any) {
           />
           {/* ← NEW: if user has a powerUp, offer to spend it */}
             {userPowerUp && !spendPowerUp && (
-              <View style={styles.powerUpRow}>
-                <Text style={styles.powerUpLabel}>
-                  Power-Up available: {userPowerUp}
-                </Text>
-                <Button
-                  title={`Use ${userPowerUp}`}
-                  onPress={() => setSpendPowerUp(userPowerUp)}
-                />
-              </View>
+              <Text style={styles.powerUpLabel}>
+                Power-Up: {userPowerUp}
+              </Text>
             )}
 
             {/* ← NEW: confirmation of chosen powerUp */}
@@ -706,6 +700,59 @@ export default function MapScreen({ route, navigation }: any) {
                 Using power-up: {spendPowerUp}
               </Text>
             )}
+          {/* Power-Up Row (Floating) - now INSIDE the modal, above actions */}
+          <View style={styles.powerUpFloatingRow}>
+    {(['Spotlight', 'Echo', 'Megaphone', 'Super Like', 'Streak Bonus'] as const).map((type) => {
+      // Choose icon and color for each powerup
+      let iconName: keyof typeof MaterialCommunityIcons.glyphMap;
+      let color = '#B0B0B0'; // gray for disabled
+      let isActive = userPowerUp === type;
+
+      switch (type) {
+        case 'Spotlight':
+          iconName = 'spotlight-beam';
+          color = isActive ? '#FFD600' : '#B0B0B0';
+          break;
+        case 'Echo':
+          iconName = 'volume-high';
+          color = isActive ? '#00B8D4' : '#B0B0B0';
+          break;
+        case 'Megaphone':
+          iconName = 'bullhorn';
+          color = isActive ? '#FF7043' : '#B0B0B0';
+          break;
+        case 'Super Like':
+          iconName = 'heart-multiple';
+          color = isActive ? '#E53935' : '#B0B0B0';
+          break;
+        case 'Streak Bonus':
+          iconName = 'fire';
+          color = isActive ? '#FF9100' : '#B0B0B0';
+          break;
+        default:
+          iconName = 'help-circle-outline';
+      }
+
+      return (
+        <TouchableOpacity
+          key={type}
+          style={styles.powerUpIconButton}
+          disabled={!isActive}
+          onPress={() => {
+            if (isActive) setSpendPowerUp(type as PowerUpType);
+          }}
+        >
+          <MaterialCommunityIcons
+            name={iconName}
+            size={32}
+            color={color}
+            style={!isActive && { opacity: 0.5 }}
+          />
+        </TouchableOpacity>
+      );
+    })}
+  </View>
+
           <View style={styles.actionsRow}>
             <TouchableOpacity
               style={styles.actionButton}
@@ -1006,10 +1053,15 @@ progressContainer: {
     shadowOffset:  { width: 0, height: 2 },
   },
   powerUpRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 8,
-    justifyContent: 'space-between',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    marginBottom: 8,
+    width: '100%',
+  },
+  powerUpButton: {
+    alignSelf: 'stretch',
+    marginTop: 6,
+    marginBottom: 8,
   },
   powerUpLabel: {
     fontSize: 14,
@@ -1021,5 +1073,27 @@ progressContainer: {
     marginBottom: 8,
     textAlign: 'center',
   },
-
+  powerUpFloatingRow: {
+    // REMOVE position, left, right, bottom, zIndex, marginHorizontal
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: 24,
+    marginBottom: 12, // add spacing above the action buttons
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
+  powerUpIconButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 4,
+    opacity: 1,
+  },
 });

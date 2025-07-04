@@ -30,6 +30,7 @@ type ShoutItem = {
   text:      string
   createdAt: Timestamp | null
   likeCount: number
+  powerUp?:  string | null
 }
 
 export default function ProfileScreen() {
@@ -69,6 +70,7 @@ export default function ProfileScreen() {
           text:      d.data().text as string,
           createdAt: (d.data().createdAt as Timestamp) || null,
           likeCount: (d.data().likeCount as number) || 0,
+          powerUp:   d.data().powerUp || null, // <-- add this line
         }))
         setShouts(items)
         setLoading(false)
@@ -96,14 +98,29 @@ export default function ProfileScreen() {
     if (item.createdAt instanceof Timestamp) {
       dateStr = item.createdAt.toDate().toLocaleString()
     }
-    // 2️⃣ compute minutes until 60-minute TTL
+
+    // Determine powerUp and TTL
+    // If you store powerUp in the shout doc, add it to ShoutItem type and here:
+    // type ShoutItem = { ..., powerUp?: string }
+    // For now, fallback to 60 min unless Echo
     let minutesLeft = 0
+    let powerUpLabel = ''
+    let ttlMs = 60 * 60 * 1000 // default 60 min
+
+    // If you have powerUp in item, use it:
+    // e.g. item.powerUp === 'Echo' ? 2*60*60*1000 : 60*60*1000
+    // For now, check for Echo by text (adjust if you add powerUp to ShoutItem)
+    if ((item as any).powerUp === 'Echo') {
+      ttlMs = 2 * 60 * 60 * 1000
+      powerUpLabel = 'Echo'
+    } else if ((item as any).powerUp) {
+      powerUpLabel = (item as any).powerUp
+    }
+
     if (item.createdAt instanceof Timestamp) {
-      const ageMs      = Date.now() - item.createdAt.toMillis()
-      const remaining  = 60*60*1000 - ageMs
-      minutesLeft      = remaining > 0
-        ? Math.ceil(remaining/60000)
-        : 0
+      const ageMs = Date.now() - item.createdAt.toMillis()
+      const remaining = ttlMs - ageMs
+      minutesLeft = remaining > 0 ? Math.ceil(remaining / 60000) : 0
     }
 
     return (
@@ -111,10 +128,17 @@ export default function ProfileScreen() {
         <Text style={styles.cardText}>{item.text}</Text>
         <View style={styles.cardMeta}>
           <Text style={styles.cardDate}>{dateStr}</Text>
-          <Text style={styles.cardExpiry}>Expires in {minutesLeft} min</Text>
+          <Text style={styles.cardExpiry}>
+            Expires in {minutesLeft} min
+          </Text>
         </View>
+        {/* Show power-up label below date/time if present */}
+        {powerUpLabel ? (
+          <Text style={styles.cardPowerUp}>
+            Power-Up: {powerUpLabel}
+          </Text>
+        ) : null}
         <View style={styles.cardFooter}>
-          
           <Text style={styles.cardLikes}>❤️ {item.likeCount}</Text>
           <TouchableOpacity
             style={styles.deleteButton}
@@ -287,6 +311,13 @@ const styles = StyleSheet.create({
     color:     '#E53935',
     fontSize:  12,
     fontStyle: 'italic',
+  },
+  cardPowerUp: {
+    color: '#E53935',
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginTop: 2,
+    marginBottom: 4,
   },
 
 })
