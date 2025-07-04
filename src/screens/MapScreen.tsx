@@ -1043,7 +1043,7 @@ progressContainer: {
     width:      48,
     height:     48,
     borderRadius: 24,
-    backgroundColor: '#5B3EFC',
+    backgroundColor: '#181C2F',
     justifyContent:  'center',
     alignItems:     'center',
     elevation:      5,  // Android shadow

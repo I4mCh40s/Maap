@@ -39,63 +39,63 @@ function HomeStackScreen() {
   );
 }
 
+
 export default function AppTabs() {
   const insets = useSafeAreaInsets();
 
+  // Custom tab bar to achieve the floating, cutout, and raised + button effect
+  function CustomTabBar({ state, descriptors, navigation }: any) {
+    return (
+      <View style={[styles.customTabBar, { paddingBottom: insets.bottom }]}>  
+        {/* Left tab */}
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityState={state.index === 0 ? { selected: true } : {}}
+          onPress={() => navigation.navigate('Home')}
+          style={styles.tabButton}
+          activeOpacity={0.7}
+        >
+          <MaterialCommunityIcons name="home" size={28} color={state.index === 0 ? '#fff' : '#7A7A7A'} />
+        </TouchableOpacity>
+
+        {/* Center cutout and raised + button */}
+        <View style={styles.plusCutoutContainer} pointerEvents="box-none">
+          <View style={styles.plusCutout} />
+          <TouchableOpacity
+            style={styles.plusButton}
+            activeOpacity={0.8}
+            onPress={() => {
+              navigation.navigate('Home', { screen: 'Map', params: { openShoutModal: true } });
+            }}
+          >
+            <MaterialCommunityIcons name="plus" size={32} color="#fff" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Right tab */}
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityState={state.index === 2 ? { selected: true } : {}}
+          onPress={() => navigation.navigate('Profile')}
+          style={styles.tabButton}
+          activeOpacity={0.7}
+        >
+          <MaterialCommunityIcons name="account" size={28} color={state.index === 2 ? '#fff' : '#7A7A7A'} />
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <Tab.Navigator
+      tabBar={props => <CustomTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarStyle: {
-          backgroundColor: '#2196F3',
-          borderTopWidth: 0,
-          paddingBottom: insets.bottom,
-          height:        56 + insets.bottom,
-        },
-        tabBarActiveTintColor:   '#fff',
-        tabBarInactiveTintColor: '#888',
       }}
     >
-      {/* Home Tab */}
-      <Tab.Screen
-        name="Home"
-        component={HomeStackScreen}
-        options={{
-          tabBarIcon: ({ color }) => (
-            <MaterialCommunityIcons name="home" size={24} color={color} />
-          ),
-        }}
-      />
-
-      {/* Add Tab: same stack, but will trigger the modal via params */}
-      <Tab.Screen
-        name="Add"
-        component={HomeStackScreen}
-        listeners={({ navigation }) => ({
-          tabPress: e => {
-            // Prevent default behavior
-            e.preventDefault();
-            // Navigate into the HomeStack, open the shout modal
-            navigation.navigate('Home', { screen: 'Map', params: { openShoutModal: true } });
-          },
-        })}
-        options={{
-          tabBarIcon: ({ color }) => (
-            <MaterialCommunityIcons name="plus-circle" size={32} color={color} />
-          ),
-        }}
-      />
-
-      {/* Profile Tab */}
-      <Tab.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{
-          tabBarIcon: ({ color }) => (
-            <MaterialCommunityIcons name="account" size={24} color={color} />
-          ),
-        }}
-      />
+      <Tab.Screen name="Home" component={HomeStackScreen} />
+      <Tab.Screen name="Add" component={HomeStackScreen} />
+      <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );
 }
@@ -103,65 +103,68 @@ export default function AppTabs() {
 
 
 const styles = StyleSheet.create({
-  tabBar: {
+  customTabBar: {
     flexDirection: 'row',
-    backgroundColor: '#2196F3',
-    paddingTop: 8,
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    // Setting a minHeight ensures the bar is tall enough for the icons,
-    // especially the raised "Add" button's negative margin.
-    minHeight: 56, 
+    backgroundColor: '#181C2F',
+    borderRadius: 24,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    height: 64,
+    alignItems: 'center', // <-- center vertically
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 8,
+    position: 'relative',
   },
   tabButton: {
     flex: 1,
     alignItems: 'center',
-  },
-  plusContainer: { // Note: This style is defined but not used in your component.
-    position: 'absolute',
-    alignSelf: 'center',
-    width: 80,
-    height: 80,
-  },
-  plusButton: { // Note: This style is defined but not used in your component.
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#2196F3',
-    alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
+    zIndex: 1,
   },
-  safeArea: {
-    backgroundColor: '#2196F3', // Tab bar color
-  },
-  bar: { // Note: This style is defined but not used in your component.
-    flexDirection: 'row',
-    backgroundColor: '#2196F3',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    minHeight: 56, // Standard Android bottom-nav height
-  },
-  plusTouch: {
-    // The "Add" button is absolutely positioned relative to its parent container.
-    // By placing it in the middle of the map, it won't take up space in the layout.
-    // We lift it up to be centered vertically over the tab bar's edge.
+  plusCutoutContainer: {
     position: 'absolute',
     left: '50%',
-    transform: [{ translateX: -28 }], // Half of the circle's width
-    top: -28, // Half of the circle's height
+    top: -20, // <-- adjust this for perfect vertical alignment
+    transform: [{ translateX: -40 }], // half of width
+    width: 80,
+    height: 80,
+    alignItems: 'center',
+    justifyContent: 'center', // <-- center the button in the cutout
+    zIndex: 2,
+    pointerEvents: 'box-none',
   },
-  plusCircle: {
+  plusCutout: {
+    position: 'absolute',
+    top: 40,
+    left: 0,
+    width: 80,
+    height: 40,
+    backgroundColor: '#181C2F',
+    borderBottomLeftRadius: 40,
+    borderBottomRightRadius: 40,
+    zIndex: 1,
+  },
+  plusButton: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#2196F3',
+    backgroundColor: '#1976FF',
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 8,
+    position: 'absolute',
+    top: 0,
+    left: 12,
+    zIndex: 2,
+    borderWidth: 4,
+    borderColor: '#181C2F',
   },
 });
