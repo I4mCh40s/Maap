@@ -51,7 +51,17 @@ export default function AppTabs() {
         <TouchableOpacity
           accessibilityRole="button"
           accessibilityState={state.index === 0 ? { selected: true } : {}}
-          onPress={() => navigation.navigate('Home')}
+          onPress={() => {
+            // Try to always go back to Map if on PowerUp modal
+            const homeStack = navigation.getState().routes.find(r => r.name === 'Home');
+            const nestedRoutes = homeStack?.state?.routes || [];
+            const lastRoute = nestedRoutes[nestedRoutes.length - 1];
+            if (lastRoute?.name === 'PowerUp' && navigation.canGoBack()) {
+              navigation.goBack();
+            } else {
+              navigation.navigate('Home', { screen: 'Map' });
+            }
+          }}
           style={styles.tabButton}
           activeOpacity={0.7}
         >

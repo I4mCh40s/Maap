@@ -16,7 +16,7 @@ import AppTabs                         from './src/navigation/AppTabs';
 import SpinScreen from './src/screens/SpinScreen'
 
 // ─── 1. Define your Auth stack’s param list ──────────────────────────
-type AuthStackParamList = {
+export type AuthStackParamList = {
   Onboarding: undefined;
   Login:      undefined;
   Signup:     undefined;

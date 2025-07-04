@@ -985,7 +985,7 @@ const styles = StyleSheet.create({
     marginBottom:  16,
   },
   shoutButton: {
-    backgroundColor: '#2196F3', // same blue you use elsewhere
+    backgroundColor: '#1976FF', // same blue you use elsewhere
   },
   progressBarContainer: {
   width:          '100%',
@@ -1081,7 +1081,7 @@ progressContainer: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     backgroundColor: 'rgba(255,255,255,0.95)',
-    borderRadius: 24,
+    borderRadius: 12,
     marginBottom: 12, // add spacing above the action buttons
     shadowColor: '#000',
     shadowOpacity: 0.08,
