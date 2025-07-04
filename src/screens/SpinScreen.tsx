@@ -14,7 +14,10 @@ import {
   getDoc,
   updateDoc,
   serverTimestamp,
+  setDoc,
 } from 'firebase/firestore'
+ // Import Alert at the top of your file
+  import { /*...,*/ Alert } from 'react-native';
 
 export default function SpinScreen() {
   // animation state
@@ -78,31 +81,43 @@ export default function SpinScreen() {
     return `${h}h ${m}m`
   }
 
-  // 2) the actual spin animation + result
+  
   function doSpin() {
-    if (!canSpin) return
+    if (!canSpin) return;
 
-    setPrize(null)
-    const toValue = 360 * 10 + Math.random() * 360
+    // Set state for cooldown UI immediately
+    setCanSpin(false);
+    setNextSpinIn(24 * 60 * 60 * 1000);
+
+    setPrize(null);
+    const toValue = 360 * 10 + Math.random() * 360;
     Animated.timing(wheelAnim, {
       toValue,
       duration: 4000,
       useNativeDriver: true,
     }).start(async () => {
-      // pick a random segment
-      const idx = Math.floor(Math.random() * segments.length)
-      const won = segments[idx]
-      setPrize(won)
+      const idx = Math.floor(Math.random() * segments.length);
+      const won = segments[idx];
+      setPrize(won);
 
-      // persist spin time so they can’t spin again for 24h
-      const user = auth.currentUser!
-      const ref  = doc(db, 'users', user.uid)
-      await updateDoc(ref, { lastSpinAt: serverTimestamp() })
+      const user = auth.currentUser!;
+      const ref = doc(db, 'users', user.uid);
 
-      // now lock them out locally until they reopen screen
-      setCanSpin(false)
-      setNextSpinIn(24 * 60 * 60 * 1000)
-    })
+      // Add error handling for the database write
+      try {
+        // 2. Change updateDoc to setDoc with the merge option
+        await setDoc(ref, {
+          lastSpinAt: serverTimestamp(),
+          powerUp: won,
+        }, { merge: true }); // This will now create the document if it's missing
+      } catch (error) {
+        console.error("Failed to update user's spin data:", error);
+        // If the database fails, roll back the UI changes to allow a retry.
+        setCanSpin(true);
+        setNextSpinIn(0);
+        Alert.alert("Error", "Your spin could not be saved. Please check your connection and try again.");
+      }
+    });
   }
 
   // 3) wheel interpolation for rotation

@@ -12,7 +12,9 @@ import {
   ActivityIndicator,
   Platform,
   StatusBar,
+  Button,
 } from 'react-native';
+
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
@@ -60,14 +62,13 @@ type Shout = {
   likeCount: number;
   likedBy: string[];
   radius: number;
+  spotlight?: boolean;
+  powerUp?: PowerUpType; 
+  echoExpiresAt?: number; 
 };
 
 // If you added "streakBonus" at Spin time, include it here:
-export type PowerUpType =
-  | 'megaphone'
-  | 'echo'
-  | 'streakBonus'   // ← make sure this matches your SpinScreen
-  | /* etc… */ string;
+type PowerUpType = 'Spotlight' | 'Echo' | 'Megaphone' | 'Super Like' | 'Streak Bonus' |null;
 
 export default function MapScreen({ route, navigation }: any) {
   const GOAL_LIKES = 10;
@@ -86,6 +87,12 @@ export default function MapScreen({ route, navigation }: any) {
 
   // DETAIL modal state now explicitly Shout|null
   const [detailShout, setDetailShout] = useState<Shout|null>(null);
+
+  //powerups
+  // ← NEW: hold what the user currently has…
+  const [userPowerUp, setUserPowerUp]       = useState<PowerUpType>(null);
+  // ← NEW: which one they're choosing to spend right now
+  const [spendPowerUp, setSpendPowerUp]     = useState<PowerUpType>(null);
 
   // search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -131,7 +138,10 @@ export default function MapScreen({ route, navigation }: any) {
       snap.docs.forEach(d => {
         const data = d.data() as any;
         const ts = (data.createdAt as Timestamp)?.toMillis() ?? now;
-        if (now - ts > 60*60*1000) {
+        const ttl = (data.powerUp === 'Echo')
+        ? 2 * 60*60*1000    // Echo gives you two hours
+        : 60*60*1000;       // everybody else 60 min
+        if (now - ts > ttl) {
           deleteDoc(d.ref);
         } else {
           valid.push({
@@ -142,6 +152,7 @@ export default function MapScreen({ route, navigation }: any) {
             authorName: data.authorName||'Anonymous',
             ownerId: data.ownerId,
             createdAt: ts,
+            spotlight: data.spotlight || false,
             likeCount: data.likeCount||0,
             likedBy: data.likedBy||[],
             radius: data.radius||500,
@@ -180,6 +191,8 @@ export default function MapScreen({ route, navigation }: any) {
       lng:       s.lng,
       createdAt: s.createdAt,
       likeCount: s.likeCount  || 0,
+      radius:    s.radius,
+      spotlight: s.spotlight,
     })),
   });
     const jsToInject = `
@@ -193,28 +206,111 @@ export default function MapScreen({ route, navigation }: any) {
     wv.current?.injectJavaScript(jsToInject);
   }, [ready, shouts, userCoords]);
 
+  // ← NEW: keep in sync with whatever Power-Up the backend thinks we have
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    const unsub = onSnapshot(
+      doc(db, 'users', uid),
+      snap => {
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          setUserPowerUp((data.powerUp as PowerUpType) || null);
+        }
+      },
+      err => {
+        console.error('⛔ could not load user powerUp', err);
+      }
+    );
+
+    return unsub;
+  }, []);
+  //superlike 
+  const onSuperLikePress = async () => {
+  if (!detailShout || userPowerUp !== 'Super Like') return;
+
+  const shoutRef = doc(db, 'shouts', detailShout.id);
+  await runTransaction(db, async tx => {
+    const snap = await tx.get(shoutRef);
+    if (!snap.exists()) throw new Error('Shout not found');
+    const data = snap.data() as any;
+
+    // bump its radius by 1000m
+    const currentR = data.radius || 500;
+    tx.update(shoutRef, {
+      radius: currentR + 1000
+    });
+  });
+
+  // clear your Super Like
+  await updateDoc(doc(db, 'users', auth.currentUser!.uid), {
+    powerUp: null
+  });
+
+  // optimistically update UI
+  setUserPowerUp(null);
+  setDetailShout({
+    ...detailShout,
+    radius: detailShout.radius + 1000
+  });
+};
+
+
   // 5) Submit a new text shout
   async function onSubmit() {
+  try {
     if (!text.trim()) {
       Alert.alert('Please enter a message');
       return;
     }
-    if (!userCoords) return;
 
-    await addDoc(collection(db, 'shouts'), {
-      text: text.trim(),
+    // 1) Figure out the shout’s base radius
+    let initialRadius = 500;
+    if (spendPowerUp === 'Streak Bonus') {
+      initialRadius = 600;
+    } else if (spendPowerUp === 'Megaphone') {
+      initialRadius = 750;
+    }
+
+    // 2) Clear the powerUp on the user doc (if any)
+    const uid = auth.currentUser!.uid;
+    if (spendPowerUp) {
+      await updateDoc(doc(db, 'users', uid), { powerUp: null });
+    }
+
+    // 3) Build the shout payload
+    const shoutPayload: any = {
+      text:       text.trim(),
       authorName: auth.currentUser?.displayName || 'Anonymous',
-      ownerId: auth.currentUser?.uid,          // ← include ownerId on create
-      location: new GeoPoint(userCoords.lat, userCoords.lng),
-      createdAt: serverTimestamp(),
-      likeCount: 0,
-      likedBy: [] as string[],
-      radius:     500,               // ← initial radius in meters
-    });
+      ownerId:    uid,
+      location:   new GeoPoint(userCoords!.lat, userCoords!.lng),
+      createdAt:  serverTimestamp(),
+      radius:     initialRadius,
+      powerUp:    spendPowerUp || null,
+      spotlight:  spendPowerUp === 'Spotlight',
+    };
 
+    // 4) Only add echoExpiresAt if they used the Echo
+    if (spendPowerUp === 'Echo') {
+      // double-hour lifespan
+      shoutPayload.echoExpiresAt = Date.now() + 2 * 60 * 60 * 1000;
+    }
+
+    // 5) Write it
+    await addDoc(collection(db, 'shouts'), shoutPayload);
+
+    // 6) Reset UI
     setText('');
+    setSpendPowerUp(null);
     setModalOpen(false);
+
+  } catch (err: any) {
+    console.error('⛔ onSubmit failed:', err);
+    Alert.alert('Error creating shout', err.message);
   }
+}
+
 
   // 6) Handle marker-tap messages from WebView
   function onWebMessage(evt: any) {
@@ -274,6 +370,10 @@ export default function MapScreen({ route, navigation }: any) {
 
         const el = document.createElement('div');
         el.className = 'marker';
+        // NEW: if spotlight, give it a glow
+        if (s.spotlight) {
+          el.style.boxShadow = '0 0 8px 4px rgba(91,62,252,0.5)';
+        }
         // use string concatenation instead of
         el.style.width        = size + 'px';
         el.style.height       = size + 'px';
@@ -324,12 +424,13 @@ export default function MapScreen({ route, navigation }: any) {
   const isOwner = detailShout?.ownerId === auth.currentUser?.uid;
 
   // ─── NEW: compute minutesLeft for countdown ──────────────────────────────────
+  const baseDuration = 60 * 60 * 1000;
+  const duration = (detailShout?.powerUp === 'Echo')
+  ? 2 * baseDuration   // double time for Echo
+  : baseDuration;
   const minutesLeft = detailShout
-    ? Math.max(
-        0,
-        Math.ceil((60 * 60 * 1000 - (Date.now() - detailShout.createdAt)) / 60000)
-      )
-    : 0;
+  ? Math.max(0, Math.ceil((duration - (Date.now() - detailShout.createdAt)) / 60000))
+  : 0;
 
   // locateMe button
   async function locateMe() {
@@ -552,6 +653,13 @@ export default function MapScreen({ route, navigation }: any) {
               </TouchableOpacity>
             )}
           </View>
+          {userPowerUp === 'Super Like' && detailShout?.ownerId !== auth.currentUser?.uid && (
+          <Button
+            title="🎉 Super Like!"
+            color="#E53935"
+            onPress={onSuperLikePress}
+          />
+        )}
         </View>
         </View>
       </View>
@@ -579,7 +687,25 @@ export default function MapScreen({ route, navigation }: any) {
             onChangeText={setText}
             multiline
           />
+          {/* ← NEW: if user has a powerUp, offer to spend it */}
+            {userPowerUp && !spendPowerUp && (
+              <View style={styles.powerUpRow}>
+                <Text style={styles.powerUpLabel}>
+                  Power-Up available: {userPowerUp}
+                </Text>
+                <Button
+                  title={`Use ${userPowerUp}`}
+                  onPress={() => setSpendPowerUp(userPowerUp)}
+                />
+              </View>
+            )}
 
+            {/* ← NEW: confirmation of chosen powerUp */}
+            {spendPowerUp && (
+              <Text style={styles.chosenPowerUp}>
+                Using power-up: {spendPowerUp}
+              </Text>
+            )}
           <View style={styles.actionsRow}>
             <TouchableOpacity
               style={styles.actionButton}
@@ -862,22 +988,38 @@ progressContainer: {
     shadowRadius: 3,
     zIndex: 10,
   },
-  spinButton: {
-  position:   'absolute',
-  bottom:     100,     // just above your + button
-  left:       16,
-  
-  width:      48,
-  height:     48,
-  borderRadius: 24,
-  backgroundColor: '#5B3EFC',
-  justifyContent:  'center',
-  alignItems:     'center',
-  elevation:      5,  // Android shadow
-  shadowColor:   '#000',
-  shadowOpacity: 0.25,
-  shadowRadius:  4,
-  shadowOffset:  { width: 0, height: 2 },
-},
+    spinButton: {
+    position:   'absolute',
+    bottom:     100,     // just above your + button
+    left:       16,
+    
+    width:      48,
+    height:     48,
+    borderRadius: 24,
+    backgroundColor: '#5B3EFC',
+    justifyContent:  'center',
+    alignItems:     'center',
+    elevation:      5,  // Android shadow
+    shadowColor:   '#000',
+    shadowOpacity: 0.25,
+    shadowRadius:  4,
+    shadowOffset:  { width: 0, height: 2 },
+  },
+  powerUpRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 8,
+    justifyContent: 'space-between',
+  },
+  powerUpLabel: {
+    fontSize: 14,
+    color: '#333',
+  },
+  chosenPowerUp: {
+    fontSize: 14,
+    color: '#007AFF',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
 
 });
