@@ -116,19 +116,40 @@ export default function MapScreen({ route, navigation }: any) {
 
   // 2) initial user loc + reverse‐geocode
   useEffect(() => {
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        return Alert.alert('Permission required', 'This app needs location access.');
+  let sub: Location.LocationSubscription | undefined;
+
+  (async () => {
+    // Already asked on mount, but safe to check again
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'This app needs location access.');
+      return;
+    }
+
+    sub = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.Highest,   // or Balanced for battery
+        timeInterval: 5000,                    // 5 s between updates
+        distanceInterval: 20,                  // or every 20 m
+      },
+      ({ coords }) => {
+        const pos = { lat: coords.latitude, lng: coords.longitude };
+      setUserCoords(pos);
+
+      // 👇 only set once, so the map won’t keep jumping
+      setMapCenter(prev => prev ?? pos);
+
+      wv.current?.injectJavaScript(`
+        if (window.userMarker) window.userMarker.setLngLat([${pos.lng}, ${pos.lat}]);
+        true;
+      `);
       }
-      const pos = await Location.getCurrentPositionAsync({});
-      const { latitude: lat, longitude: lng } = pos.coords;
-      setUserCoords({lat,lng});
-      setMapCenter({lat,lng});
-      const [place] = await Location.reverseGeocodeAsync(pos.coords);
-      setAddress([place.city, place.region].filter(Boolean).join(', '));
-    })();
-  }, []);
+    );
+  })();
+
+  // Clean up when screen unmounts
+  return () => sub?.remove();
+}, []);
 
   // 3) subscribe + TTL cleanup
   useEffect(() => {
@@ -198,7 +219,7 @@ export default function MapScreen({ route, navigation }: any) {
     const jsToInject = `
       (function() {
         window.dispatchEvent(new MessageEvent('message', {
-          data: ${JSON.stringify(payload)}
+          data: '${payload.replace(/'/g, "\\'")}'   // <-- just ONE stringify, wrapped in quotes
         }));
       })();
       true;
@@ -325,92 +346,107 @@ export default function MapScreen({ route, navigation }: any) {
 
   // 7) Build the TomTom HTML
   const TOMTOM_KEY = 'zoyiO1lknbi8bagOcFtqev5TcihUwvbR';
-  const html = `
-<!DOCTYPE html><html><head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="initial-scale=1.0,user-scalable=no"/>
-  <script src="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps-web.min.js"></script>
-  <link href="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps.css" rel="stylesheet"/>
-  <style>
-    html,body,#map {margin:0;padding:0;width:100%;height:100%}
-    .marker {width:20px;height:20px;background: #5B3EFC;border:2px solid #FFF;border-radius:50%;cursor:pointer;transform: translate(-50%, -50%);z-index: 2;}
-    .user-marker {width: 16px; height: 16px; background: rgba(0,150,136,0.8); border: 2px solid #FFF; border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,0.3); transform: translate(-50%, -50%);z-index: 1; }
-  </style>
-</head><body>
-  <div id="map"></div>
-  <script>
-  const map = tt.map({
-    key: '${TOMTOM_KEY}',
-    container: 'map',
-    center: [${mapCenter?.lng}, ${mapCenter?.lat}],
-    zoom: 14,
-    style: "https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAMzJSMkJDa1NmTGNvR2h3RzsO9cOMFdVDGI-DPwgg0BlM.json?key=${TOMTOM_KEY}" // <--- UPDATED LINE
-  });
+  function buildTomTomHtml(
+  center: { lat: number; lng: number }
+): string {
+  return `
+        <!DOCTYPE html><html><head>
+          <meta charset="utf-8"/>
+          <meta name="viewport" content="initial-scale=1.0,user-scalable=no"/>
+          <script src="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps-web.min.js"></script>
+          <link href="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps.css" rel="stylesheet"/>
+          <style>
+            html,body,#map {margin:0;padding:0;width:100%;height:100%}
+            .marker {width:20px;height:20px;background: #5B3EFC;border:2px solid #FFF;border-radius:50%;cursor:pointer;transform: translate(-50%, -50%);z-index: 2;}
+            .user-marker {width: 16px; height: 16px; background: rgba(0,150,136,0.8); border: 2px solid #FFF; border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,0.3); transform: translate(-50%, -50%);z-index: 1; }
+          </style>
+        </head><body>
+          <div id="map"></div>
+          <script>
+          const map = tt.map({
+            key: '${TOMTOM_KEY}',
+            container: 'map',
+            center: [${mapCenter?.lng}, ${mapCenter?.lat}],
+            zoom: 14,
+            style: "https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAMzJSMkJDa1NmTGNvR2h3RzsO9cOMFdVDGI-DPwgg0BlM.json?key=${TOMTOM_KEY}" // <--- UPDATED LINE
+          });
 
-  // 2) add “you are here” marker
-  const userEl = document.createElement('div');
-  userEl.className = 'user-marker';
-  new tt.Marker({ element: userEl })
-    .setLngLat([${userCoords?.lng}, ${userCoords?.lat}])
-    .addTo(map);                              
-  
-  let markers = [];
-  function clearMarkers() {
-    markers.forEach(m => m.remove());
-    markers = [];
+          // 2) add “you are here” marker
+          const userEl = document.createElement('div');
+          userEl.className = 'user-marker';
+          new tt.Marker({ element: userEl })
+            .setLngLat([${mapCenter?.lng}, ${mapCenter?.lat}])
+            .addTo(map);                              
+          
+          let markers = [];
+          function clearMarkers() {
+            markers.forEach(m => m.remove());
+            markers = [];
+          }
+
+          function addMarkers(shouts) {
+              clearMarkers();
+              const now = Date.now();
+
+              shouts.forEach(s => {
+                const likes = s.likeCount || 0;
+                const size  = 20 + Math.sqrt(likes) * 5;
+
+                const el = document.createElement('div');
+                el.className = 'marker';
+                // NEW: if spotlight, give it a glow
+                if (s.spotlight) {
+                  el.style.boxShadow = '0 0 8px 4px rgba(91,62,252,0.5)';
+                }
+                // use string concatenation instead of
+                el.style.width        = size + 'px';
+                el.style.height       = size + 'px';
+                el.style.borderRadius = (size/2) + 'px';
+                el.style.transform    = 'translate(' + (-size/2) + 'px, ' + (-size/2) + 'px)';
+
+                el.onclick = () => {
+                  window.ReactNativeWebView.postMessage(
+                    JSON.stringify({ type:'shoutTap', id: s.id })
+                  );
+                };
+
+                const m = new tt.Marker({ element: el })
+                  .setLngLat([s.lng, s.lat])
+                  .addTo(map);
+                markers.push(m);
+              });
+            }
+
+          // ← New unified handler for messages from React Native
+          function handleMsg(e) {
+            try {
+              const msg = JSON.parse(e.data);
+              if (msg.type === 'shouts') {
+                addMarkers(msg.data);
+              }
+            } catch (err) {
+              console.error('Failed to handle message', err);
+            }
+          }
+
+          // Listen on both, so it works on iOS and Android WebView
+          document.addEventListener('message', handleMsg);
+          window.addEventListener('message', handleMsg);
+        </script>
+
+        </body></html>`;
   }
 
-  function addMarkers(shouts) {
-      clearMarkers();
-      const now = Date.now();
+  // inside your component function
+    const htmlRef = useRef<string | null>(null);
 
-      shouts.forEach(s => {
-        const likes = s.likeCount || 0;
-        const size  = 20 + Math.sqrt(likes) * 5;
-
-        const el = document.createElement('div');
-        el.className = 'marker';
-        // NEW: if spotlight, give it a glow
-        if (s.spotlight) {
-          el.style.boxShadow = '0 0 8px 4px rgba(91,62,252,0.5)';
-        }
-        // use string concatenation instead of
-        el.style.width        = size + 'px';
-        el.style.height       = size + 'px';
-        el.style.borderRadius = (size/2) + 'px';
-        el.style.transform    = 'translate(' + (-size/2) + 'px, ' + (-size/2) + 'px)';
-
-        el.onclick = () => {
-          window.ReactNativeWebView.postMessage(
-            JSON.stringify({ type:'shoutTap', id: s.id })
-          );
-        };
-
-        const m = new tt.Marker({ element: el })
-          .setLngLat([s.lng, s.lat])
-          .addTo(map);
-        markers.push(m);
-      });
+    if (!htmlRef.current && mapCenter) {
+      htmlRef.current = buildTomTomHtml(mapCenter); // runs once
     }
 
-  // ← New unified handler for messages from React Native
-  function handleMsg(e) {
-    try {
-      const msg = JSON.parse(e.data);
-      if (msg.type === 'shouts') {
-        addMarkers(msg.data);
-      }
-    } catch (err) {
-      console.error('Failed to handle message', err);
+    if (!htmlRef.current) {
+      return <ActivityIndicator style={{ flex: 1 }} />;
     }
-  }
-
-  // Listen on both, so it works on iOS and Android WebView
-  document.addEventListener('message', handleMsg);
-  window.addEventListener('message', handleMsg);
-</script>
-
-</body></html>`;
 
   if (!userCoords) {
     return (
@@ -438,7 +474,7 @@ export default function MapScreen({ route, navigation }: any) {
   // just fetch a new one, no need to re-ask permission:
   const pos = await Location.getCurrentPositionAsync({});
   const { latitude, longitude } = pos.coords;
-  setUserCoords({ lat: latitude, lng: longitude });
+  setMapCenter({ lat: latitude, lng: longitude });
 
   // tell the WebView to recenter…
   const js = `
@@ -517,7 +553,7 @@ export default function MapScreen({ route, navigation }: any) {
     {/* ─── Map / WebView ──────────────────────────────── */}
     <WebView
       ref={wv}
-      source={{ html }}
+      source={{ html: htmlRef.current }}
       originWhitelist={['*']}
       onLoadEnd={() => setReady(true)}
       onMessage={onWebMessage}
