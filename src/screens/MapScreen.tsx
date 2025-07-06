@@ -23,6 +23,7 @@ import {
   collection,
   onSnapshot,
   addDoc,
+  getDoc,
   serverTimestamp,
   GeoPoint,
   deleteDoc,
@@ -65,6 +66,7 @@ type Shout = {
   spotlight?: boolean;
   powerUp?: PowerUpType; 
   echoExpiresAt?: number; 
+  authorIsVerified: boolean;
 };
 
 // If you added "streakBonus" at Spin time, include it here:
@@ -177,6 +179,7 @@ export default function MapScreen({ route, navigation }: any) {
             likeCount: data.likeCount||0,
             likedBy: data.likedBy||[],
             radius: data.radius||500,
+            authorIsVerified: data.authorIsVerified ?? false,
           });
         }
       });
@@ -300,6 +303,10 @@ export default function MapScreen({ route, navigation }: any) {
       await updateDoc(doc(db, 'users', uid), { powerUp: null });
     }
 
+
+    const userDoc = await getDoc(doc(db, 'users', uid));
+    const isVerified = userDoc.data()?.isVerified ?? false;
+
     // 3) Build the shout payload
     const shoutPayload: any = {
       text:       text.trim(),
@@ -310,6 +317,7 @@ export default function MapScreen({ route, navigation }: any) {
       radius:     initialRadius,
       powerUp:    spendPowerUp || null,
       spotlight:  spendPowerUp === 'Spotlight',
+      authorIsVerified: isVerified,
     };
 
     // 4) Only add echoExpiresAt if they used the Echo
@@ -616,9 +624,19 @@ export default function MapScreen({ route, navigation }: any) {
                 {detailShout?.authorName.charAt(0)}
               </Text>
             </View>
-            <Text style={styles.modalTitle}>
-              {detailShout?.authorName} shouted
-            </Text>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={styles.modalTitle}>{detailShout?.authorName}</Text>
+              {detailShout?.authorIsVerified && (
+                <MaterialCommunityIcons
+                  name="check-decagram"
+                  size={18}
+                  color="#3BAEFC"
+                  style={{ marginLeft: 4, transform: [{ translateY: -6 }] }}
+                />
+              )}
+              <Text style={styles.modalTitle}> shouted</Text>
+            </View>
           </View>
 
           {/* the shout text */}

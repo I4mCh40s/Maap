@@ -9,10 +9,14 @@ import {
   Alert,
   TouchableOpacity,
 } from 'react-native';
+import {                // ⇠ make sure these are in your imports
+  createUserWithEmailAndPassword,
+  updateProfile,
+} from "firebase/auth";
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { auth } from '../firebase'
 import { db } from '../firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import shared from '../components/SharedStyles'
 
 type AuthStackParamList = {
@@ -27,25 +31,32 @@ export default function SignupScreen({ navigation }: Props) {
   const [password, setPassword] = useState('');
 
   const onSignup = async () => {
-    try {
-      const cred = await auth.createUserWithEmailAndPassword(
-        email,
-        password
-      );
-      const user = cred.user;
-      if (!user) throw new Error('No user returned from signup.');
-      await user.updateProfile({ displayName });
-      await setDoc(doc(db, 'users', user.uid), {
-        displayName,
-        email,
-        powerUp: null,
-        createdAt: new Date().toISOString(),
-        lastSpinAt: null,
-      });
-    } catch (e: any) {
-      Alert.alert('Signup failed', e.message);
-    }
-  };
+  try {
+    // 1️⃣  create auth account
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    const { user } = cred;
+    if (!user) throw new Error("No user returned from signup.");
+
+    // 2️⃣  save displayName to auth profile
+    await updateProfile(user, { displayName });
+
+    // 3️⃣  create Firestore profile document
+    await setDoc(
+      doc(db, "users", user.uid),
+      {
+        displayName,          // visible name in the app
+        email,                // email address
+        isVerified: false,    // new users are NOT verified by default
+        lastSpinAt: null,     // track daily-spin timestamp
+        powerUp: null,        // current power-up in inventory
+        createdAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch (e: any) {
+    Alert.alert("Signup failed", e.message);
+  }
+};
 
   return (
     <View style={styles.container}>

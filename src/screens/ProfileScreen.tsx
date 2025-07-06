@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
+  Image
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
@@ -43,6 +44,11 @@ export default function ProfileScreen() {
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
+  const [profile, setProfile] = useState<{           // 👈 new
+    isVerified: boolean;
+    photoURL?: string | null;
+  }>({ isVerified: false });
+
   // show any fetch errors once, then clear
   useEffect(() => {
     if (fetchError) {
@@ -50,6 +56,21 @@ export default function ProfileScreen() {
       setFetchError(null)
     }
   }, [fetchError])
+
+  useEffect(() => {
+  if (!uid) return;
+  const ref = doc(db, 'users', uid);
+  const unsub = onSnapshot(ref, snap => {
+    if (snap.exists()) {
+      const d = snap.data() as any;
+      setProfile({
+        isVerified: !!d.isVerified,
+        photoURL: d.photoURL ?? null,
+      });
+    }
+  });
+  return unsub;
+}, [uid]);
 
   // real-time listener for *your* shouts
   useEffect(() => {
@@ -176,13 +197,33 @@ export default function ProfileScreen() {
         <Text style={styles.title}>Your Profile</Text>
 
         {/* USER INFO */}
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>Name:</Text>
-          <Text style={styles.value}>{user?.displayName ?? '–'}</Text>
-        </View>
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>Email:</Text>
-          <Text style={styles.value}>{user?.email}</Text>
+        <View style={styles.headerRow}>
+          {profile.photoURL ? (
+            <Image source={{ uri: profile.photoURL }} style={styles.avatar} />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Text style={styles.avatarText}>
+                {(user?.displayName ?? '🤖').charAt(0)}
+              </Text>
+            </View>
+          )}
+
+          <View style={{ marginLeft: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={styles.displayName}>
+                {user?.displayName ?? '—'}
+              </Text>
+              {profile.isVerified && (
+                <MaterialCommunityIcons
+                  name="check-decagram"
+                  size={18}
+                  color="#3BAEFC"
+                  style={{ marginLeft: 4, transform: [{ translateY: +1 }] }} 
+                />
+              )}
+            </View>
+            <Text style={styles.email}>{user?.email}</Text>
+          </View>
         </View>
 
         {/* LOG OUT BUTTON */}
@@ -327,5 +368,13 @@ const styles = StyleSheet.create({
     marginTop: 2,
     marginBottom: 4,
   },
-
+  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
+  avatar:    { width: 48, height: 48, borderRadius: 24 },
+  displayName:{ fontSize: 18, fontWeight: '600', color: '#222' },
+  email:     { fontSize: 14, color: '#666' },
+  avatarPlaceholder:{          // reuse the one you already have or keep this
+    width:48,height:48,borderRadius:24,
+    backgroundColor:'#EEE',alignItems:'center',justifyContent:'center'
+  },
+  avatarText:{ fontSize:20,color:'#555' },
 })
