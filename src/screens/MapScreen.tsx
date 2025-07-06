@@ -374,7 +374,7 @@ export default function MapScreen({ route, navigation }: any) {
           // 2) add “you are here” marker
           const userEl = document.createElement('div');
           userEl.className = 'user-marker';
-          new tt.Marker({ element: userEl })
+          window.userMarker = new tt.Marker({ element: userEl })
             .setLngLat([${mapCenter?.lng}, ${mapCenter?.lat}])
             .addTo(map);                              
           
