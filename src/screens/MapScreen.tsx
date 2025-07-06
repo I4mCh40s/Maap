@@ -365,7 +365,7 @@ export default function MapScreen({ route, navigation }: any) {
           <link href="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps.css" rel="stylesheet"/>
           <style>
             html,body,#map {margin:0;padding:0;width:100%;height:100%}
-            .marker {width:20px;height:20px;background: #5B3EFC;border:2px solid #FFF;border-radius:50%;cursor:pointer;transform: translate(-50%, -50%);z-index: 2;}
+            .marker {width:20px;height:20px;background: #007AFF;border:2px solid #FFF;border-radius:50%;cursor:pointer;transform: translate(-50%, -50%);z-index: 2;}
             .user-marker {width: 16px; height: 16px; background: rgba(0,150,136,0.8); border: 2px solid #FFF; border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,0.3); transform: translate(-50%, -50%);z-index: 1; }
           </style>
         </head><body>
@@ -1150,4 +1150,5 @@ progressContainer: {
     padding: 4,
     opacity: 1,
   },
+  
 });
