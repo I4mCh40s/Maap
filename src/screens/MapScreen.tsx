@@ -217,6 +217,7 @@ export default function MapScreen({ route, navigation }: any) {
       likeCount: s.likeCount  || 0,
       radius:    s.radius,
       spotlight: s.spotlight,
+      authorIsVerified: !!s.authorIsVerified
     })),
   });
     const jsToInject = `
@@ -352,10 +353,23 @@ export default function MapScreen({ route, navigation }: any) {
     } catch {}
   }
 
+  type MiniShout = {
+  lat: number;
+  lng: number;
+  authorIsVerified: boolean;
+  };
+
+  const mini = shouts.map(s => ({
+  lat: s.lat,
+  lng: s.lng,
+  authorIsVerified: !!s.authorIsVerified,
+  }));
+
   // 7) Build the TomTom HTML
   const TOMTOM_KEY = 'zoyiO1lknbi8bagOcFtqev5TcihUwvbR';
   function buildTomTomHtml(
-  center: { lat: number; lng: number }
+  center: { lat: number; lng: number;  },
+  shouts: MiniShout[] 
 ): string {
   return `
         <!DOCTYPE html><html><head>
@@ -364,10 +378,31 @@ export default function MapScreen({ route, navigation }: any) {
           <script src="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps-web.min.js"></script>
           <link href="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps.css" rel="stylesheet"/>
           <style>
-            html,body,#map {margin:0;padding:0;width:100%;height:100%}
-            .marker {width:20px;height:20px;background: #007AFF;border:2px solid #FFF;border-radius:50%;cursor:pointer;transform: translate(-50%, -50%);z-index: 2;}
-            .user-marker {width: 16px; height: 16px; background: rgba(0,150,136,0.8); border: 2px solid #FFF; border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,0.3); transform: translate(-50%, -50%);z-index: 1; }
+            html,body,#map{margin:0;padding:0;width:100%;height:100%}
+
+            /* default pins */
+            .marker       {width:20px;height:20px;background:#007AFF;border:2px solid #FFF;border-radius:50%;cursor:pointer;z-index:2}
+            .user-marker  {width:16px;height:16px;background:rgba(0,150,136,.8);border:2px solid #FFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,.3);transform:translate(-50%,-50%);z-index:1}
+
+            /* verified pin + halo */
+            .verified-pin{
+              width:20px;height:20px;background:#007AFF;border:2px solid #FFF;border-radius:50%;cursor:pointer;z-index:2;
+              position:relative;                 /* create containing block for ::after */
+            }
+            .verified-pin::after{
+              content:\"\";position:absolute;left:50%;top:50%;          /* anchor in the centre */
+              width:60px;height:60px;margin:-30px 0 0 -30px;          /* pull back half-size */
+              border-radius:50%;background:rgba(59,174,252,.35);
+              animation:pulse 2s infinite;
+            }
+
+            @keyframes pulse{
+              0%  {transform:scale(.2);opacity:.8}
+              70% {transform:scale(1); opacity:.1}
+              100%{transform:scale(.2);opacity:0}
+            }
           </style>
+
         </head><body>
           <div id="map"></div>
           <script>
@@ -401,10 +436,10 @@ export default function MapScreen({ route, navigation }: any) {
                 const size  = 20 + Math.sqrt(likes) * 5;
 
                 const el = document.createElement('div');
-                el.className = 'marker';
+                el.className = s.authorIsVerified ? 'verified-pin' : 'marker';
                 // NEW: if spotlight, give it a glow
                 if (s.spotlight) {
-                  el.style.boxShadow = '0 0 8px 4px rgba(91,62,252,0.5)';
+                  el.style.boxShadow = '0 0 8px 4px rgba(62, 100, 252, 0.5)';
                 }
                 // use string concatenation instead of
                 el.style.width        = size + 'px';
@@ -449,7 +484,7 @@ export default function MapScreen({ route, navigation }: any) {
     const htmlRef = useRef<string | null>(null);
 
     if (!htmlRef.current && mapCenter) {
-      htmlRef.current = buildTomTomHtml(mapCenter); // runs once
+      htmlRef.current = buildTomTomHtml(mapCenter, mini); // runs once
     }
 
     if (!htmlRef.current) {
