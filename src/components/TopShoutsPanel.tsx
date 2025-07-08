@@ -1,7 +1,6 @@
 // src/components/TopShoutsPanel.tsx
 // Lightweight “Top Shouts nearby” overlay. Fetches the most‑liked shouts
 // (likeCount > 0) within `radius` metres of the user.
-
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -35,7 +34,7 @@ export interface Shout {
 
 interface Props {
   userCoords: { lat: number; lng: number } | null;
-  top?: number; 
+  top?: number;
   radius?: number; // metres, default 500
   onSelectShout?: (shout: Shout) => void;
 }
@@ -46,12 +45,12 @@ export default function TopShoutsPanel({
   radius = 500,
   onSelectShout,
 }: Props) {
+  const [shoutPool, setShoutPool] = useState<Shout[]>([]);
   const [visibleShouts, setVisibleShouts] = useState<Shout[]>([]);
   const [expanded, setExpanded] = useState(false);
 
   // slide animation 0 (collapsed) → 1 (expanded)
   const slide = useRef(new Animated.Value(0)).current;
-
   useEffect(() => {
     Animated.timing(slide, {
       toValue: expanded ? 1 : 0,
@@ -61,17 +60,13 @@ export default function TopShoutsPanel({
     }).start();
   }, [expanded, slide]);
 
-  // ---------- Firestore listener ----------
+  // ---------- Firestore listener (runs once) ----------
   useEffect(() => {
-    if (!userCoords) return;
-
-    // We now query by **likeCount** (numeric field) instead of “likes”.
-    // Add a small >0 filter so empty docs don’t come back.
     const topQ = query(
       collection(db, 'shouts'),
       where('likeCount', '>', 0),
       orderBy('likeCount', 'desc'),
-      limit(20),
+      limit(20)
     );
 
     const unsub = onSnapshot(topQ, snap => {
@@ -79,14 +74,12 @@ export default function TopShoutsPanel({
       snap.forEach(doc => {
         const d = doc.data() as any;
 
-        // accommodate both numeric fields and GeoPoint objects
         const lat: number | undefined =
           typeof d.lat === 'number' ? d.lat : d.location?.latitude;
         const lng: number | undefined =
           typeof d.lng === 'number' ? d.lng : d.location?.longitude;
 
         if (typeof lat !== 'number' || typeof lng !== 'number') {
-          // skip malformed docs – prevents "Invalid GeoFire location" error
           return;
         }
 
@@ -99,28 +92,40 @@ export default function TopShoutsPanel({
           authorAvatar: d.authorAvatar || undefined,
         });
       });
-
-      const nearby = pool
-        .filter(s =>
-          distanceBetween(
-            [userCoords.lat, userCoords.lng],
-            [s.lat, s.lng],
-          ) <= radius,
-        )
-        .slice(0, 5);
-
-      setVisibleShouts(nearby);
-(nearby);
+      setShoutPool(pool);
     });
 
     return unsub;
-  }, [userCoords, radius]);
+  }, []);
+
+  // ---------- Client-side filtering (runs when user moves or shouts update) ----------
+  useEffect(() => {
+    if (!userCoords) return;
+
+    const nearby = shoutPool
+      .filter(
+        s =>
+          distanceBetween([userCoords.lat, userCoords.lng], [s.lat, s.lng]) <=
+          radius / 1000
+      )
+      .slice(0, 5);
+
+    setVisibleShouts(nearby);
+  }, [userCoords, radius, shoutPool]);
+
+  // Effect to automatically collapse the panel when there are no shouts
+  useEffect(() => {
+    if (visibleShouts.length === 0) {
+      setExpanded(false);
+    }
+  }, [visibleShouts]);
 
   const translateY = slide.interpolate({
     inputRange: [0, 1],
     outputRange: [-130, 0],
   });
 
+  // If there are no shouts to show, remove the component entirely
   if (!userCoords || visibleShouts.length === 0) return null;
 
   return (
@@ -135,31 +140,34 @@ export default function TopShoutsPanel({
       </TouchableOpacity>
 
       {/* sliding list – only mounted when expanded */}
-        {expanded && (
+      {expanded && (
         <Animated.FlatList
-            style={[styles.listWrapper, { transform: [{ translateY }] }]}
-            data={visibleShouts}
-            keyExtractor={item => item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.listContent}
-            renderItem={({ item }) => (
+          style={[styles.listWrapper, { transform: [{ translateY }] }]}
+          data={visibleShouts}
+          keyExtractor={item => item.id}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.listContent}
+          renderItem={({ item }) => (
             <TouchableOpacity
-                style={styles.card}
-                activeOpacity={0.8}
-                onPress={() => onSelectShout?.(item)}
+              style={styles.card}
+              activeOpacity={0.8}
+              onPress={() => onSelectShout?.(item)}
             >
-                {item.authorAvatar && (
-                <Image source={{ uri: item.authorAvatar }} style={styles.avatar} />
-                )}
-                <Text style={styles.text} numberOfLines={2}>
+              {item.authorAvatar && (
+                <Image
+                  source={{ uri: item.authorAvatar }}
+                  style={styles.avatar}
+                />
+              )}
+              <Text style={styles.text} numberOfLines={2}>
                 {item.text}
-                </Text>
-                <Text style={styles.likes}>❤️ {item.likes}</Text>
+              </Text>
+              <Text style={styles.likes}>❤️ {item.likes}</Text>
             </TouchableOpacity>
-            )}
+          )}
         />
-        )}
+      )}
     </View>
   );
 }
@@ -171,7 +179,6 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     paddingTop: 8,
-
   },
   handle: {
     alignSelf: 'flex-start',
@@ -213,7 +220,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     alignSelf: 'flex-end',
   },
-  listWrapper: {
-  
-},
+  listWrapper: {},
 });
