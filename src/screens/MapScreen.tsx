@@ -17,6 +17,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import TopShoutsPanel from '../components/TopShoutsPanel';
 
 import {
   collection,
@@ -82,6 +83,10 @@ export default function MapScreen({ route, navigation }: any) {
   const [mapCenter, setMapCenter] = useState<{lat:number,lng:number}|null>(null);
   const [address, setAddress] = useState('');
   const [shouts, setShouts] = useState<Shout[]>([]);
+
+  const SEARCH_HEIGHT = 40;                // ← same value as in styles
+  const SEARCH_Y      = insets.top + 8;    // the bar’s top position
+  const PANEL_TOP     = SEARCH_Y + SEARCH_HEIGHT + 8;  // bar + small gap
 
   // text/shout‐creation state
   const [modalOpen, setModalOpen] = useState(false);
@@ -409,7 +414,7 @@ export default function MapScreen({ route, navigation }: any) {
           const map = tt.map({
             key: '${TOMTOM_KEY}',
             container: 'map',
-            center: [${mapCenter?.lng}, ${mapCenter?.lat}],
+            center: [${center?.lng}, ${center?.lat}],
             zoom: 14,
             style: "https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAMzJSMkJDa1NmTGNvR2h3RzsO9cOMFdVDGI-DPwgg0BlM.json?key=${TOMTOM_KEY}" // <--- UPDATED LINE
           });
@@ -418,7 +423,7 @@ export default function MapScreen({ route, navigation }: any) {
           const userEl = document.createElement('div');
           userEl.className = 'user-marker';
           window.userMarker = new tt.Marker({ element: userEl })
-            .setLngLat([${mapCenter?.lng}, ${mapCenter?.lat}])
+            .setLngLat([${center?.lng}, ${center?.lat}])
             .addTo(map);                              
           
           let markers = [];
@@ -602,10 +607,20 @@ export default function MapScreen({ route, navigation }: any) {
       onMessage={onWebMessage}
       style={styles.webview}
     />
+    {/* TOP 🔥 strip */}
+    <TopShoutsPanel
+      userCoords={userCoords}
+      top={PANEL_TOP}
+      onSelectShout={s => {
+        wv.current?.injectJavaScript(
+          `map.flyTo({ center: [${s.lng}, ${s.lat}], zoom: 17 }); true;`
+        );
+      }}
+    />
     {/* ─── Floating Search Pill ───────────────────────── */}
     <View style={[
           styles.searchBar,
-          { top: insets.top + 8 },            // status-bar height + margin
+          { top: SEARCH_Y },            // status-bar height + margin
         ]}>
       <TextInput
         style={styles.searchInput}
