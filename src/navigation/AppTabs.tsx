@@ -46,7 +46,17 @@ export default function AppTabs() {
   // Custom tab bar to achieve the floating, cutout, and raised + button effect
   function CustomTabBar({ state, descriptors, navigation }: any) {
     return (
-      <View style={[styles.customTabBar, { paddingBottom: insets.bottom }]}>  
+      <View
+        style={[
+          styles.customTabBar,
+          {
+            position: 'absolute',          // ⭐ take it out of the flex flow
+            left: 16,
+            right: 16,
+            bottom: insets.bottom + 8,     // ⭐ sits right above the gesture bar
+          },
+        ]}
+      > 
         {/* Left tab */}
         <TouchableOpacity
           accessibilityRole="button"
@@ -69,10 +79,12 @@ export default function AppTabs() {
         </TouchableOpacity>
 
         {/* Center cutout and raised + button */}
-        <View style={styles.plusCutoutContainer} pointerEvents="box-none">
+        <View style={[styles.plusCutoutContainer,
+          { bottom: insets.bottom },   // lift the mask too
+        ]} pointerEvents="box-none">
           <View style={styles.plusCutout} />
           <TouchableOpacity
-            style={styles.plusButton}
+            style={[styles.plusButton, { bottom: 12 }]}
             activeOpacity={0.8}
             onPress={() => {
               navigation.navigate('Home', { screen: 'Map', params: { openShoutModal: true } });
@@ -115,19 +127,16 @@ export default function AppTabs() {
 const styles = StyleSheet.create({
   customTabBar: {
     flexDirection: 'row',
-    backgroundColor: '#181C2F',
-    borderRadius: 24,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    height: 64,
-    alignItems: 'center', // <-- center vertically
+    alignItems: 'center',
     justifyContent: 'space-between',
+    height: 64,                 // visible height
+    backgroundColor: '#0F1325',
+    borderRadius: 24,
     shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 8,
-    position: 'relative',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+    // NOTE: no paddingBottom here — we handled the inset in the parent
   },
   tabButton: {
     flex: 1,
@@ -138,7 +147,7 @@ const styles = StyleSheet.create({
   plusCutoutContainer: {
     position: 'absolute',
     left: '50%',
-    top: -20, // <-- adjust this for perfect vertical alignment
+    top: -40, // <-- adjust this for perfect vertical alignment
     transform: [{ translateX: -40 }], // half of width
     width: 80,
     height: 80,

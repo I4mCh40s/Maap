@@ -1,7 +1,6 @@
 // src/screens/MapScreen.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  SafeAreaView,
   View,
   Text,
   Modal,
@@ -14,7 +13,7 @@ import {
   StatusBar,
   Button,
 } from 'react-native';
-
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
@@ -73,6 +72,7 @@ type Shout = {
 type PowerUpType = 'Spotlight' | 'Echo' | 'Megaphone' | 'Super Like' | 'Streak Bonus' |null;
 
 export default function MapScreen({ route, navigation }: any) {
+  const insets = useSafeAreaInsets();
   const GOAL_LIKES = 10;
 
   // 0) Helpers…
@@ -374,7 +374,7 @@ export default function MapScreen({ route, navigation }: any) {
   return `
         <!DOCTYPE html><html><head>
           <meta charset="utf-8"/>
-          <meta name="viewport" content="initial-scale=1.0,user-scalable=no"/>
+          <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
           <script src="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps-web.min.js"></script>
           <link href="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps.css" rel="stylesheet"/>
           <style>
@@ -591,7 +591,7 @@ export default function MapScreen({ route, navigation }: any) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={{ flex: 1 /* map fills whole screen */ }}>
 
     {/* ─── Map / WebView ──────────────────────────────── */}
     <WebView
@@ -603,7 +603,10 @@ export default function MapScreen({ route, navigation }: any) {
       style={styles.webview}
     />
     {/* ─── Floating Search Pill ───────────────────────── */}
-    <View style={styles.searchBar}>
+    <View style={[
+          styles.searchBar,
+          { top: insets.top + 8 },            // status-bar height + margin
+        ]}>
       <TextInput
         style={styles.searchInput}
         placeholder="Search location"
@@ -619,7 +622,8 @@ export default function MapScreen({ route, navigation }: any) {
     
     {/* ─── Locate-Me Button ────────────────────────── */}
       <TouchableOpacity
-        style={styles.locateButton}
+        style={[styles.locateButton,
+          { bottom: insets.bottom + 80 }]}
         onPress={locateMe}
       >
         <MaterialIcons name="my-location" size={24} color="#333" />
@@ -628,7 +632,8 @@ export default function MapScreen({ route, navigation }: any) {
       {/* ─── Spin Button ────────────────────────── */}
       <TouchableOpacity
         onPress={() => navigation.navigate('PowerUp')}
-        style={styles.spinButton}
+        style={[styles.spinButton,
+          { bottom: insets.bottom + 80 }]}
       >
       <MaterialCommunityIcons
         name="dice-multiple"
