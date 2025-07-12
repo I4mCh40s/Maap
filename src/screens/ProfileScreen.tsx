@@ -44,10 +44,12 @@ export default function ProfileScreen() {
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
-  const [profile, setProfile] = useState<{           // 👈 new
+  // --- MODIFICATION: Added isMerchant to profile state ---
+  const [profile, setProfile] = useState<{
     isVerified: boolean;
+    isMerchant: boolean; // 👈 new
     photoURL?: string | null;
-  }>({ isVerified: false });
+  }>({ isVerified: false, isMerchant: false }); // 👈 new
 
   // show any fetch errors once, then clear
   useEffect(() => {
@@ -58,19 +60,21 @@ export default function ProfileScreen() {
   }, [fetchError])
 
   useEffect(() => {
-  if (!uid) return;
-  const ref = doc(db, 'users', uid);
-  const unsub = onSnapshot(ref, snap => {
-    if (snap.exists()) {
-      const d = snap.data() as any;
-      setProfile({
-        isVerified: !!d.isVerified,
-        photoURL: d.photoURL ?? null,
-      });
-    }
-  });
-  return unsub;
-}, [uid]);
+    if (!uid) return;
+    const ref = doc(db, 'users', uid);
+    const unsub = onSnapshot(ref, snap => {
+      if (snap.exists()) {
+        const d = snap.data() as any;
+        // --- MODIFICATION: Fetch isMerchant alongside isVerified ---
+        setProfile({
+          isVerified: !!d.isVerified,
+          isMerchant: !!d.isMerchant, // 👈 new
+          photoURL: d.photoURL ?? null,
+        });
+      }
+    });
+    return unsub;
+  }, [uid]);
 
   // real-time listener for *your* shouts
   useEffect(() => {
@@ -92,7 +96,7 @@ export default function ProfileScreen() {
           text:      d.data().text as string,
           createdAt: (d.data().createdAt as Timestamp) || null,
           likeCount: (d.data().likeCount as number) || 0,
-          powerUp:   d.data().powerUp || null, // <-- add this line
+          powerUp:   d.data().powerUp || null,
         }))
         setShouts(items)
         setLoading(false)
@@ -126,17 +130,10 @@ export default function ProfileScreen() {
       dateStr = item.createdAt.toDate().toLocaleString()
     }
 
-    // Determine powerUp and TTL
-    // If you store powerUp in the shout doc, add it to ShoutItem type and here:
-    // type ShoutItem = { ..., powerUp?: string }
-    // For now, fallback to 60 min unless Echo
     let minutesLeft = 0
     let powerUpLabel = ''
     let ttlMs = 60 * 60 * 1000 // default 60 min
 
-    // If you have powerUp in item, use it:
-    // e.g. item.powerUp === 'Echo' ? 2*60*60*1000 : 60*60*1000
-    // For now, check for Echo by text (adjust if you add powerUp to ShoutItem)
     if ((item as any).powerUp === 'Echo') {
       ttlMs = 2 * 60 * 60 * 1000
       powerUpLabel = 'Echo'
@@ -159,7 +156,6 @@ export default function ProfileScreen() {
             Expires in {minutesLeft} min
           </Text>
         </View>
-        {/* Show power-up label below date/time if present */}
         {powerUpLabel ? (
           <Text style={styles.cardPowerUp}>
             Power-Up: {powerUpLabel}
@@ -198,7 +194,7 @@ export default function ProfileScreen() {
 
         {/* USER INFO */}
         <View style={styles.headerRow}>
-          {profile.photoURL ? (
+           {profile.photoURL ? (
             <Image source={{ uri: profile.photoURL }} style={styles.avatar} />
           ) : (
             <View style={styles.avatarPlaceholder}>
@@ -213,14 +209,22 @@ export default function ProfileScreen() {
               <Text style={styles.displayName}>
                 {user?.displayName ?? '—'}
               </Text>
-              {profile.isVerified && (
+              {/* --- MODIFICATION: Show merchant icon or verified icon --- */}
+              {profile.isMerchant ? (
+                <MaterialCommunityIcons
+                  name="storefront" // 👈 new icon for merchants
+                  size={18}
+                  color="#FF7043" // 👈 new color for merchants
+                  style={{ marginLeft: 4, transform: [{ translateY: +1 }] }}
+                />
+              ) : profile.isVerified ? (
                 <MaterialCommunityIcons
                   name="check-decagram"
                   size={18}
                   color="#3BAEFC"
-                  style={{ marginLeft: 4, transform: [{ translateY: +1 }] }} 
+                  style={{ marginLeft: 4, transform: [{ translateY: +1 }] }}
                 />
-              )}
+              ) : null}
             </View>
             <Text style={styles.email}>{user?.email}</Text>
           </View>
@@ -261,6 +265,7 @@ export default function ProfileScreen() {
   )
 }
 
+// Add your existing styles here...
 const styles = StyleSheet.create({
   safe: {
     flex:            1,
@@ -330,7 +335,7 @@ const styles = StyleSheet.create({
     elevation:       2,
   },
   cardText: {
-    fontSize:    16,
+    fontSize:     16,
     marginBottom: 8,
     color:       '#222',
   },
@@ -372,7 +377,7 @@ const styles = StyleSheet.create({
   avatar:    { width: 48, height: 48, borderRadius: 24 },
   displayName:{ fontSize: 18, fontWeight: '600', color: '#222' },
   email:     { fontSize: 14, color: '#666' },
-  avatarPlaceholder:{          // reuse the one you already have or keep this
+  avatarPlaceholder:{
     width:48,height:48,borderRadius:24,
     backgroundColor:'#EEE',alignItems:'center',justifyContent:'center'
   },

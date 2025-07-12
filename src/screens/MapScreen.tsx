@@ -67,6 +67,7 @@ type Shout = {
   powerUp?: PowerUpType; 
   echoExpiresAt?: number; 
   authorIsVerified: boolean;
+  authorIsMerchant: boolean;
 };
 
 // If you added "streakBonus" at Spin time, include it here:
@@ -185,6 +186,7 @@ export default function MapScreen({ route, navigation }: any) {
             likedBy: data.likedBy||[],
             radius: data.radius||500,
             authorIsVerified: data.authorIsVerified ?? false,
+            authorIsMerchant: data.authorIsMerchant ?? false,
           });
         }
       });
@@ -222,7 +224,8 @@ export default function MapScreen({ route, navigation }: any) {
       likeCount: s.likeCount  || 0,
       radius:    s.radius,
       spotlight: s.spotlight,
-      authorIsVerified: !!s.authorIsVerified
+      authorIsVerified: !!s.authorIsVerified,
+      authorIsMerchant: !!s.authorIsMerchant,
     })),
   });
     const jsToInject = `
@@ -295,15 +298,6 @@ export default function MapScreen({ route, navigation }: any) {
       return;
     }
 
-    // 1) Figure out the shout’s base radius
-    let initialRadius = 500;
-    if (spendPowerUp === 'Streak Bonus') {
-      initialRadius = 600;
-    } else if (spendPowerUp === 'Megaphone') {
-      initialRadius = 750;
-    }
-
-    // 2) Clear the powerUp on the user doc (if any)
     const uid = auth.currentUser!.uid;
     if (spendPowerUp) {
       await updateDoc(doc(db, 'users', uid), { powerUp: null });
@@ -312,6 +306,20 @@ export default function MapScreen({ route, navigation }: any) {
 
     const userDoc = await getDoc(doc(db, 'users', uid));
     const isVerified = userDoc.data()?.isVerified ?? false;
+    const isMerchant = userDoc.data()?.isMerchant ?? false;
+
+    // 1) Figure out the shout’s base radius
+    let initialRadius = 500;
+      if (isMerchant) {
+        initialRadius = 750; // 👈 new: merchant radius
+      } else if (spendPowerUp === 'Streak Bonus') {
+        initialRadius = 600;
+      } else if (spendPowerUp === 'Megaphone') {
+        initialRadius = 750;
+      }
+
+    // 2) Clear the powerUp on the user doc (if any)
+    
 
     // 3) Build the shout payload
     const shoutPayload: any = {
@@ -324,6 +332,7 @@ export default function MapScreen({ route, navigation }: any) {
       powerUp:    spendPowerUp || null,
       spotlight:  spendPowerUp === 'Spotlight',
       authorIsVerified: isVerified,
+      authorIsMerchant: isMerchant,
     };
 
     // 4) Only add echoExpiresAt if they used the Echo
@@ -362,12 +371,14 @@ export default function MapScreen({ route, navigation }: any) {
   lat: number;
   lng: number;
   authorIsVerified: boolean;
+  authorIsMerchant: boolean;
   };
 
   const mini = shouts.map(s => ({
   lat: s.lat,
   lng: s.lng,
   authorIsVerified: !!s.authorIsVerified,
+  authorIsMerchant: !!s.authorIsMerchant,
   }));
 
   // 7) Build the TomTom HTML
@@ -386,12 +397,12 @@ export default function MapScreen({ route, navigation }: any) {
             html,body,#map{margin:0;padding:0;width:100%;height:100%}
 
             /* default pins */
-            .marker       {width:20px;height:20px;background:#007AFF;border:2px solid #FFF;border-radius:50%;cursor:pointer;z-index:2}
-            .user-marker  {width:16px;height:16px;background:rgba(0,150,136,.8);border:2px solid #FFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,.3);transform:translate(-50%,-50%);z-index:1}
+            .marker       {width:15px;height:15px;background:#007AFF;border:2px solid #FFF;border-radius:50%;cursor:pointer;z-index:2}
+            .user-marker  {width:10px;height:10px;background:rgba(0,150,136,.8);border:2px solid #FFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,.3);transform:translate(-50%,-50%);z-index:1}
 
             /* verified pin + halo */
             .verified-pin{
-              width:20px;height:20px;background:#007AFF;border:2px solid #FFF;border-radius:50%;cursor:pointer;z-index:2;
+              width:15px;height:15px;background:#007AFF;border:3px solid #ffffffff;border-radius:50%;cursor:pointer;z-index:2;
               position:relative;                 /* create containing block for ::after */
             }
             .verified-pin::after{
@@ -399,6 +410,11 @@ export default function MapScreen({ route, navigation }: any) {
               width:60px;height:60px;margin:-30px 0 0 -30px;          /* pull back half-size */
               border-radius:50%;background:rgba(59,174,252,.35);
               animation:pulse 2s infinite;
+            }
+            .merchant-pin {
+              width:16px; height:16px; background:#FF7043; /* 👈 new: merchant color */
+              border:2px solid #FFF; cursor:pointer; z-index:2;
+              /* Note: this is a square, not a circle */
             }
 
             @keyframes pulse{
@@ -433,37 +449,40 @@ export default function MapScreen({ route, navigation }: any) {
           }
 
           function addMarkers(shouts) {
-              clearMarkers();
-              const now = Date.now();
+            clearMarkers();
+            shouts.forEach(s => {
+              const likes = s.likeCount || 0;
+              const size  = 20 + Math.sqrt(likes) * 5;
+              const el = document.createElement('div');
 
-              shouts.forEach(s => {
-                const likes = s.likeCount || 0;
-                const size  = 20 + Math.sqrt(likes) * 5;
+              // --- MODIFICATION: Check for merchant status first ---
+              if (s.authorIsMerchant) {
+                el.className = 'merchant-pin'; // 👈 new
+              } else if (s.authorIsVerified) {
+                el.className = 'verified-pin';
+              } else {
+                el.className = 'marker';
+              }
+              
+              if (s.spotlight) { el.style.boxShadow = '0 0 8px 4px rgba(62, 100, 252, 0.5)'; }
 
-                const el = document.createElement('div');
-                el.className = s.authorIsVerified ? 'verified-pin' : 'marker';
-                // NEW: if spotlight, give it a glow
-                if (s.spotlight) {
-                  el.style.boxShadow = '0 0 8px 4px rgba(62, 100, 252, 0.5)';
+              // Use specific size for merchant pin, dynamic for others
+              if (!s.authorIsMerchant) {
+                el.style.width = size + 'px';
+                el.style.height = size + 'px';
+                if (!s.authorIsVerified) {
+                    el.style.borderRadius = (size/2) + 'px';
                 }
-                // use string concatenation instead of
-                el.style.width        = size + 'px';
-                el.style.height       = size + 'px';
-                el.style.borderRadius = (size/2) + 'px';
-                el.style.transform    = 'translate(' + (-size/2) + 'px, ' + (-size/2) + 'px)';
+                el.style.transform = 'translate(' + (-size/2) + 'px, ' + (-size/2) + 'px)';
+              } else {
+                el.style.transform = 'translate(-8px, -8px)'; // half of 16px
+              }
 
-                el.onclick = () => {
-                  window.ReactNativeWebView.postMessage(
-                    JSON.stringify({ type:'shoutTap', id: s.id })
-                  );
-                };
-
-                const m = new tt.Marker({ element: el })
-                  .setLngLat([s.lng, s.lat])
-                  .addTo(map);
-                markers.push(m);
-              });
-            }
+              el.onclick = () => { window.ReactNativeWebView.postMessage(JSON.stringify({ type:'shoutTap', id: s.id })); };
+              const m = new tt.Marker({ element: el }).setLngLat([s.lng, s.lat]).addTo(map);
+              markers.push(m);
+            });
+          }
 
           // ← New unified handler for messages from React Native
           function handleMsg(e) {
