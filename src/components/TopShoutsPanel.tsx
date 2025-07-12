@@ -1,5 +1,5 @@
 // src/components/TopShoutsPanel.tsx
-// Lightweight “Top Shouts nearby” overlay. Fetches the most‑liked shouts
+// Lightweight “Top Shouts nearby” overlay. Fetches the most-liked shouts
 // (likeCount > 0) within `radius` metres of the user.
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -12,6 +12,7 @@ import {
   Animated,
   Easing,
 } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons'
 import {
   collection,
   limit,
@@ -26,16 +27,19 @@ import { distanceBetween } from 'geofire-common';
 export interface Shout {
   id: string;
   text: string;
-  likes: number; // client‑side prop – maps to likeCount in Firestore
+  likes: number;
   lat: number;
   lng: number;
   authorAvatar?: string;
+  authorName?: string;
+  authorIsMerchant?: boolean;
+  authorIsVerified?: boolean;
 }
 
 interface Props {
   userCoords: { lat: number; lng: number } | null;
   top?: number;
-  radius?: number; // metres, default 500
+  radius?: number;
   onSelectShout?: (shout: Shout) => void;
 }
 
@@ -49,7 +53,6 @@ export default function TopShoutsPanel({
   const [visibleShouts, setVisibleShouts] = useState<Shout[]>([]);
   const [expanded, setExpanded] = useState(false);
 
-  // slide animation 0 (collapsed) → 1 (expanded)
   const slide = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(slide, {
@@ -60,7 +63,6 @@ export default function TopShoutsPanel({
     }).start();
   }, [expanded, slide]);
 
-  // ---------- Firestore listener (runs once) ----------
   useEffect(() => {
     const topQ = query(
       collection(db, 'shouts'),
@@ -73,15 +75,11 @@ export default function TopShoutsPanel({
       const pool: Shout[] = [];
       snap.forEach(doc => {
         const d = doc.data() as any;
-
         const lat: number | undefined =
           typeof d.lat === 'number' ? d.lat : d.location?.latitude;
         const lng: number | undefined =
           typeof d.lng === 'number' ? d.lng : d.location?.longitude;
-
-        if (typeof lat !== 'number' || typeof lng !== 'number') {
-          return;
-        }
+        if (typeof lat !== 'number' || typeof lng !== 'number') return;
 
         pool.push({
           id: doc.id,
@@ -90,6 +88,9 @@ export default function TopShoutsPanel({
           lat,
           lng,
           authorAvatar: d.authorAvatar || undefined,
+          authorName: d.authorName || 'Anonymous',
+          authorIsMerchant: d.authorIsMerchant || false,
+          authorIsVerified: d.authorIsVerified || false,
         });
       });
       setShoutPool(pool);
@@ -98,10 +99,8 @@ export default function TopShoutsPanel({
     return unsub;
   }, []);
 
-  // ---------- Client-side filtering (runs when user moves or shouts update) ----------
   useEffect(() => {
     if (!userCoords) return;
-
     const nearby = shoutPool
       .filter(
         s =>
@@ -109,15 +108,11 @@ export default function TopShoutsPanel({
           radius / 1000
       )
       .slice(0, 5);
-
     setVisibleShouts(nearby);
   }, [userCoords, radius, shoutPool]);
 
-  // Effect to automatically collapse the panel when there are no shouts
   useEffect(() => {
-    if (visibleShouts.length === 0) {
-      setExpanded(false);
-    }
+    if (visibleShouts.length === 0) setExpanded(false);
   }, [visibleShouts]);
 
   const translateY = slide.interpolate({
@@ -125,12 +120,10 @@ export default function TopShoutsPanel({
     outputRange: [-130, 0],
   });
 
-  // If there are no shouts to show, remove the component entirely
   if (!userCoords || visibleShouts.length === 0) return null;
 
   return (
-    <View pointerEvents="box-none" style={[styles.container, { top }]}>
-      {/* always‑visible handle */}
+    <View pointerEvents="box-none" style={[styles.container, { top }]}> 
       <TouchableOpacity
         activeOpacity={0.7}
         style={styles.handle}
@@ -139,7 +132,6 @@ export default function TopShoutsPanel({
         <Text style={styles.handleText}>Top 🔥</Text>
       </TouchableOpacity>
 
-      {/* sliding list – only mounted when expanded */}
       {expanded && (
         <Animated.FlatList
           style={[styles.listWrapper, { transform: [{ translateY }] }]}
@@ -154,15 +146,40 @@ export default function TopShoutsPanel({
               activeOpacity={0.8}
               onPress={() => onSelectShout?.(item)}
             >
-              {item.authorAvatar && (
-                <Image
-                  source={{ uri: item.authorAvatar }}
-                  style={styles.avatar}
-                />
-              )}
+              {/* Header: avatar, username, icon */}
+              <View style={styles.headerRow}>
+                {item.authorAvatar && (
+                  <Image
+                    source={{ uri: item.authorAvatar }}
+                    style={styles.avatar}
+                  />
+                )}
+                <Text style={styles.username} numberOfLines={1}>
+                  {item.authorName}
+                </Text>
+                {item.authorIsMerchant ? (
+                  <MaterialCommunityIcons
+                    name="storefront"
+                    size={18}
+                    color="#FF7043"
+                    style={styles.iconOffset}
+                  />
+                ) : item.authorIsVerified ? (
+                  <MaterialCommunityIcons
+                    name="check-decagram"
+                    size={18}
+                    color="#3BAEFC"
+                    style={styles.iconOffset}
+                  />
+                ) : null}
+              </View>
+
+              {/* Shout text */}
               <Text style={styles.text} numberOfLines={2}>
                 {item.text}
               </Text>
+
+              {/* Likes */}
               <Text style={styles.likes}>❤️ {item.likes}</Text>
             </TouchableOpacity>
           )}
@@ -203,11 +220,26 @@ const styles = StyleSheet.create({
     padding: 12,
     marginRight: 12,
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
   avatar: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    marginBottom: 8,
+    marginRight: 8,
+  },
+  username: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+  iconOffset: {
+    marginLeft: 4,
+    transform: [{ translateY: 1 }],
   },
   text: {
     color: '#fff',

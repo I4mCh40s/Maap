@@ -413,7 +413,7 @@ export default function MapScreen({ route, navigation }: any) {
             }
             .merchant-pin {
               width:16px; height:16px; background:#FF7043; /* 👈 new: merchant color */
-              border:2px solid #FFF; cursor:pointer; z-index:2;
+              border:2px solid #FFF;border-radius:50%; cursor:pointer; z-index:2;
               /* Note: this is a square, not a circle */
             }
 
@@ -700,17 +700,28 @@ export default function MapScreen({ route, navigation }: any) {
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={styles.modalTitle}>{detailShout?.authorName}</Text>
-              {detailShout?.authorIsVerified && (
-                <MaterialCommunityIcons
-                  name="check-decagram"
-                  size={18}
-                  color="#3BAEFC"
-                  style={{ marginLeft: 4, transform: [{ translateY: -6 }] }}
-                />
-              )}
-              <Text style={styles.modalTitle}> shouted</Text>
-            </View>
+            <Text style={styles.modalTitle}>
+              {detailShout?.authorName}
+            </Text>
+
+            {detailShout?.authorIsMerchant ? (
+              <MaterialCommunityIcons
+                name="storefront"            // merchant icon
+                size={18}
+                color="#FF7043"              // your merchant color
+                style={{ marginLeft: 4, transform: [{ translateY: -6 }] }}
+              />
+            ) : detailShout?.authorIsVerified ? (
+              <MaterialCommunityIcons
+                name="check-decagram"        // verified icon
+                size={18}
+                color="#3BAEFC"
+                style={{ marginLeft: 4, transform: [{ translateY: -6 }] }}
+              />
+            ) : null}
+
+            <Text style={styles.modalTitle}> shouted</Text>
+          </View>
           </View>
 
           {/* the shout text */}
