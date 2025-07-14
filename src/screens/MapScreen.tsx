@@ -1,5 +1,5 @@
 // src/screens/MapScreen.tsx
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -35,6 +35,7 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import WebMapView from '../components/WebMapView'; // Adjust path as needed
 
 function getDistanceMeters(
   lat1: number, lon1: number,
@@ -105,6 +106,9 @@ export default function MapScreen({ route, navigation }: any) {
   // search state
   const [searchQuery, setSearchQuery] = useState('');
   // … location-search center, power-up, etc …
+  const [jsToInject, setJsToInject] = useState<{ code: string; timestamp: number } | undefined>();
+  
+  
 
   // 1a) Open Shout Modal effect
   useEffect(() => {
@@ -147,10 +151,12 @@ export default function MapScreen({ route, navigation }: any) {
       // 👇 only set once, so the map won’t keep jumping
       setMapCenter(prev => prev ?? pos);
 
-      wv.current?.injectJavaScript(`
-        if (window.userMarker) window.userMarker.setLngLat([${pos.lng}, ${pos.lat}]);
-        true;
-      `);
+      const js = `if (window.userMarker) window.userMarker.setLngLat([${pos.lng}, ${pos.lat}]);`;
+          if (Platform.OS === 'web') {
+            setJsToInject({ code: js, timestamp: Date.now() });
+          } else {
+            wv.current?.injectJavaScript(`${js} true;`);
+          }
       }
     );
   })();
@@ -197,25 +203,13 @@ export default function MapScreen({ route, navigation }: any) {
 
   // 4) send “visible” shouts to WebView
   useEffect(() => {
-    if (!ready || !userCoords) return;
-    const { lat: uLat, lng: uLng } = userCoords;
+    if (!ready) return;
 
-    // bounding‐box prefilter
-    const maybe = shouts.filter(s => {
-      const latDelta = s.radius / 111_320;
-      const lngDelta = s.radius / (111_320 * Math.cos(uLat * Math.PI/180));
-      return Math.abs(uLat - s.lat) <= latDelta
-          && Math.abs(uLng - s.lng) <= lngDelta;
-    });
-
-    // exact circle check
-    const visible = maybe.filter(s =>
-      getDistanceMeters(uLat, uLng, s.lat, s.lng) <= s.radius
-    );
+    
 
     const payload = JSON.stringify({
       type: 'shouts',
-      data: visible.map(s => ({
+      data: shouts.map(s => ({
       id:        s.id,
       text:      s.text,
       lat:       s.lat,
@@ -228,16 +222,19 @@ export default function MapScreen({ route, navigation }: any) {
       authorIsMerchant: !!s.authorIsMerchant,
     })),
   });
-    const jsToInject = `
+    const jsString = `
       (function() {
         window.dispatchEvent(new MessageEvent('message', {
-          data: '${payload.replace(/'/g, "\\'")}'   // <-- just ONE stringify, wrapped in quotes
+          data: '${payload.replace(/'/g, "\\'")}'
         }));
       })();
-      true;
     `;
-    wv.current?.injectJavaScript(jsToInject);
-  }, [ready, shouts, userCoords]);
+    if (Platform.OS === 'web') {
+      setJsToInject({ code: jsString, timestamp: Date.now() });
+    } else {
+      wv.current?.injectJavaScript(`${jsString} true;`);
+    }
+  }, [ready, shouts]);
 
   // ← NEW: keep in sync with whatever Power-Up the backend thinks we have
   useEffect(() => {
@@ -363,6 +360,10 @@ export default function MapScreen({ route, navigation }: any) {
       if (msg.type === 'shoutTap') {
         const s = shouts.find(x => x.id === msg.id);
         if (s) setDetailShout(s);
+      } 
+      // ADD THIS ELSE IF BLOCK:
+      else if (msg.type === 'MAP_READY') {
+        setReady(true);
       }
     } catch {}
   }
@@ -374,20 +375,18 @@ export default function MapScreen({ route, navigation }: any) {
   authorIsMerchant: boolean;
   };
 
-  const mini = shouts.map(s => ({
-  lat: s.lat,
-  lng: s.lng,
-  authorIsVerified: !!s.authorIsVerified,
-  authorIsMerchant: !!s.authorIsMerchant,
-  }));
+  
 
   // 7) Build the TomTom HTML
-  const TOMTOM_KEY = 'zoyiO1lknbi8bagOcFtqev5TcihUwvbR';
+  const TOMTOM_KEY = 'zoyiO1lknbi8bagOcFtqev5TcihUwvbR'; 
   function buildTomTomHtml(
-  center: { lat: number; lng: number;  },
-  shouts: MiniShout[] 
-): string {
-  return `
+    center: { lat: number; lng: number;  },
+    shouts: MiniShout[]
+  ): string {
+    // Stringify the shouts data to safely inject it into the script
+    const initialShouts = JSON.stringify(shouts);
+
+    return `
         <!DOCTYPE html><html><head>
           <meta charset="utf-8"/>
           <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
@@ -395,28 +394,24 @@ export default function MapScreen({ route, navigation }: any) {
           <link href="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps.css" rel="stylesheet"/>
           <style>
             html,body,#map{margin:0;padding:0;width:100%;height:100%}
-
-            /* default pins */
+            /* Styles remain the same */
             .marker       {width:15px;height:15px;background:#007AFF;border:2px solid #FFF;border-radius:50%;cursor:pointer;z-index:2}
             .user-marker  {width:10px;height:10px;background:rgba(0,150,136,.8);border:2px solid #FFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,.3);transform:translate(-50%,-50%);z-index:1}
-
-            /* verified pin + halo */
             .verified-pin{
               width:15px;height:15px;background:#007AFF;border:3px solid #ffffffff;border-radius:50%;cursor:pointer;z-index:2;
-              position:relative;                 /* create containing block for ::after */
+              position:relative;
             }
             .verified-pin::after{
-              content:\"\";position:absolute;left:50%;top:50%;          /* anchor in the centre */
-              width:60px;height:60px;margin:-30px 0 0 -30px;          /* pull back half-size */
+              content:"";position:absolute;left:50%;top:50%;
+              width:60px;height:60px;margin:-30px 0 0 -30px;
               border-radius:50%;background:rgba(59,174,252,.35);
               animation:pulse 2s infinite;
             }
             .merchant-pin {
-              width:16px; height:16px; background:#FF7043; /* 👈 new: merchant color */
-              border:2px solid #FFF;border-radius:50%; cursor:pointer; z-index:2;
-              /* Note: this is a square, not a circle */
+              width:16px; height:16px; background:#FF7043;
+              border:2px solid #FFF;border-radius:50%;
+              cursor:pointer; z-index:2;
             }
-
             @keyframes pulse{
               0%  {transform:scale(.2);opacity:.8}
               70% {transform:scale(1); opacity:.1}
@@ -427,93 +422,115 @@ export default function MapScreen({ route, navigation }: any) {
         </head><body>
           <div id="map"></div>
           <script>
-          const map = tt.map({
-            key: '${TOMTOM_KEY}',
-            container: 'map',
-            center: [${center?.lng}, ${center?.lat}],
-            zoom: 14,
-            style: "https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAMzJSMkJDa1NmTGNvR2h3RzsO9cOMFdVDGI-DPwgg0BlM.json?key=${TOMTOM_KEY}" // <--- UPDATED LINE
-          });
-
-          // 2) add “you are here” marker
-          const userEl = document.createElement('div');
-          userEl.className = 'user-marker';
-          window.userMarker = new tt.Marker({ element: userEl })
-            .setLngLat([${center?.lng}, ${center?.lat}])
-            .addTo(map);                              
-          
-          let markers = [];
-          function clearMarkers() {
-            markers.forEach(m => m.remove());
-            markers = [];
-          }
-
-          function addMarkers(shouts) {
-            clearMarkers();
-            shouts.forEach(s => {
-              const likes = s.likeCount || 0;
-              const size  = 20 + Math.sqrt(likes) * 5;
-              const el = document.createElement('div');
-
-              // --- MODIFICATION: Check for merchant status first ---
-              if (s.authorIsMerchant) {
-                el.className = 'merchant-pin'; // 👈 new
-              } else if (s.authorIsVerified) {
-                el.className = 'verified-pin';
+            // --- FIX 1: Universal postMessage function ---
+            // This checks if it's running in React Native's WebView or a standard browser iframe.
+            const postToApp = (message) => {
+              if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(message);
               } else {
-                el.className = 'marker';
+                window.parent.postMessage(message, '*');
               }
-              
-              if (s.spotlight) { el.style.boxShadow = '0 0 8px 4px rgba(62, 100, 252, 0.5)'; }
+            };
 
-              // Use specific size for merchant pin, dynamic for others
-              if (!s.authorIsMerchant) {
-                el.style.width = size + 'px';
-                el.style.height = size + 'px';
-                if (!s.authorIsVerified) {
-                    el.style.borderRadius = (size/2) + 'px';
-                }
-                el.style.transform = 'translate(' + (-size/2) + 'px, ' + (-size/2) + 'px)';
-              } else {
-                el.style.transform = 'translate(-8px, -8px)'; // half of 16px
-              }
-
-              el.onclick = () => { window.ReactNativeWebView.postMessage(JSON.stringify({ type:'shoutTap', id: s.id })); };
-              const m = new tt.Marker({ element: el }).setLngLat([s.lng, s.lat]).addTo(map);
-              markers.push(m);
+            const map = tt.map({
+              key: '${TOMTOM_KEY}',
+              container: 'map',
+              center: [${center?.lng}, ${center?.lat}],
+              zoom: 14,
+              style: "https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAMzJSMkJDa1NmTGNvR2h3RzsO9cOMFdVDGI-DPwgg0BlM.json?key=${TOMTOM_KEY}"
             });
-          }
 
-          // ← New unified handler for messages from React Native
-          function handleMsg(e) {
-            try {
-              const msg = JSON.parse(e.data);
-              if (msg.type === 'shouts') {
-                addMarkers(msg.data);
-              }
-            } catch (err) {
-              console.error('Failed to handle message', err);
+            const userEl = document.createElement('div');
+            userEl.className = 'user-marker';
+            window.userMarker = new tt.Marker({ element: userEl })
+              .setLngLat([${center?.lng}, ${center?.lat}])
+              .addTo(map);
+
+            let markers = [];
+            function clearMarkers() {
+              markers.forEach(m => m.remove());
+              markers = [];
             }
-          }
 
-          // Listen on both, so it works on iOS and Android WebView
-          document.addEventListener('message', handleMsg);
-          window.addEventListener('message', handleMsg);
-        </script>
+            function addMarkers(shouts) {
+              clearMarkers();
+              shouts.forEach(s => {
+                const likes = s.likeCount || 0;
+                const size  = 20 + Math.sqrt(likes) * 5;
+                const el = document.createElement('div');
 
+                if (s.authorIsMerchant) {
+                  el.className = 'merchant-pin';
+                } else if (s.authorIsVerified) {
+                  el.className = 'verified-pin';
+                } else {
+                  el.className = 'marker';
+                }
+                
+                if (s.spotlight) { el.style.boxShadow = '0 0 8px 4px rgba(62, 100, 252, 0.5)'; }
+
+                if (!s.authorIsMerchant) {
+                  el.style.width = size + 'px';
+                  el.style.height = size + 'px';
+                  if (!s.authorIsVerified) {
+                      el.style.borderRadius = (size/2) + 'px';
+                  }
+                  el.style.transform = 'translate(' + (-size/2) + 'px, ' + (-size/2) + 'px)';
+                } else {
+                  el.style.transform = 'translate(-8px, -8px)';
+                }
+
+                // Use the universal postToApp function here
+                el.onclick = () => { postToApp(JSON.stringify({ type:'shoutTap', id: s.id })); };
+
+                const m = new tt.Marker({ element: el }).setLngLat([s.lng, s.lat]).addTo(map);
+                markers.push(m);
+              });
+            }
+
+            function handleJsInjection(e) {
+                try {
+                    const msg = JSON.parse(e.data);
+                    if (msg.type === 'EXEC_JS') {
+                        eval(msg.code);
+                    }
+                } catch (err) { /* Not a JS injection, ignore */ }
+            }
+            
+            function handleMsg(e) {
+              try {
+                const msg = JSON.parse(e.data);
+                if (msg.type === 'shouts') {
+                  addMarkers(msg.data);
+                } else if (msg.type === 'EXEC_JS') {
+                  eval(msg.code);
+                }
+              } catch (err) { /* Not a JSON message, ignore */ }
+            }
+
+            map.on('load', function() {
+              // ADD THIS LINE: Send a message to signal readiness
+              postToApp(JSON.stringify({ type: 'MAP_READY' }));
+
+              // The initialShouts variable is embedded from the function parameters
+              const initialShouts = ${initialShouts};
+              addMarkers(initialShouts);
+            });
+
+            window.addEventListener('message', handleMsg);
+            document.addEventListener('message', handleMsg);
+
+          </script>
         </body></html>`;
   }
 
-  // inside your component function
-    const htmlRef = useRef<string | null>(null);
+  const mapHtml = useMemo(() => {
+    if (!mapCenter) return ''; // Don't generate HTML until we have a center
 
-    if (!htmlRef.current && mapCenter) {
-      htmlRef.current = buildTomTomHtml(mapCenter, mini); // runs once
-    }
-
-    if (!htmlRef.current) {
-      return <ActivityIndicator style={{ flex: 1 }} />;
-    }
+    // Pass an empty array for shouts. The useEffect hook will populate them after load.
+    return buildTomTomHtml(mapCenter, []);
+  }, [mapCenter]); // IMPORTANT: The dependency is ONLY mapCenter
+    
 
   if (!userCoords) {
     return (
@@ -544,12 +561,12 @@ export default function MapScreen({ route, navigation }: any) {
   setMapCenter({ lat: latitude, lng: longitude });
 
   // tell the WebView to recenter…
-  const js = `
-    map.setCenter([${longitude}, ${latitude}]);
-    if (window.userMarker) window.userMarker.setLngLat([${longitude}, ${latitude}]);
-    true;
-  `;
-  wv.current?.injectJavaScript(js);
+  const js = `map.setCenter([${longitude}, ${latitude}]); if (window.userMarker) window.userMarker.setLngLat([${longitude}, ${latitude}]);`;
+    if (Platform.OS === 'web') {
+      setJsToInject({ code: js, timestamp: Date.now() });
+    } else {
+      wv.current?.injectJavaScript(`${js} true;`);
+    }
   }
 
   // Search
@@ -567,11 +584,12 @@ export default function MapScreen({ route, navigation }: any) {
         // ➋ update your address bar to show the query
         setAddress(searchQuery);
         // ➌ inject JS so the WebView map recenters
-        const recenterJS = `
-          map.setCenter([${pos.lon}, ${pos.lat}]);
-          true; 
-        `;
-        wv.current?.injectJavaScript(recenterJS);
+        const recenterJS = `map.setCenter([${pos.lon}, ${pos.lat}]);`;
+        if (Platform.OS === 'web') {
+          setJsToInject({ code: recenterJS, timestamp: Date.now() });
+        } else {
+          wv.current?.injectJavaScript(`${recenterJS} true;`);
+        }
       } else {
         Alert.alert('Not found', 'Could not locate that address.');
       }
@@ -615,25 +633,41 @@ export default function MapScreen({ route, navigation }: any) {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1 /* map fills whole screen */ }}>
+    <SafeAreaView style={{ flex: 1 }}>
 
     {/* ─── Map / WebView ──────────────────────────────── */}
-    <WebView
-      ref={wv}
-      source={{ html: htmlRef.current }}
-      originWhitelist={['*']}
-      onLoadEnd={() => setReady(true)}
-      onMessage={onWebMessage}
-      style={styles.webview}
-    />
+    {mapCenter && (
+      Platform.OS === 'web' ? (
+        <WebMapView
+          // --- CHANGE THIS LINE ---
+          html={mapHtml} 
+          onMessage={onWebMessage}
+          jsToInject={jsToInject}
+        />
+      ) : (
+        <WebView
+          ref={wv}
+          // --- AND CHANGE THIS LINE ---
+          source={{ html: mapHtml }}
+          originWhitelist={['*']}
+          onLoadEnd={() => setReady(true)}
+          onMessage={onWebMessage}
+          style={styles.webview}
+        />
+      )
+    )}
     {/* TOP 🔥 strip */}
     <TopShoutsPanel
       userCoords={userCoords}
       top={PANEL_TOP}
       onSelectShout={s => {
-        wv.current?.injectJavaScript(
-          `map.flyTo({ center: [${s.lng}, ${s.lat}], zoom: 17 }); true;`
-        );
+        // EDIT 6: Replace injectJavaScript with setJsToInject state update.
+        const js = `map.flyTo({ center: [${s.lng}, ${s.lat}], zoom: 17 });`;
+        if (Platform.OS === 'web') {
+          setJsToInject({ code: js, timestamp: Date.now() });
+        } else {
+          wv.current?.injectJavaScript(`${js} true;`);
+        }
       }}
     />
     {/* ─── Floating Search Pill ───────────────────────── */}
