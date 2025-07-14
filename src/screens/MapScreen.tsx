@@ -71,6 +71,7 @@ type Shout = {
   authorIsMerchant: boolean;
 };
 
+let lastKnownUserCoords: { lat: number, lng: number } | null = null;
 // If you added "streakBonus" at Spin time, include it here:
 type PowerUpType = 'Spotlight' | 'Echo' | 'Megaphone' | 'Super Like' | 'Streak Bonus' |null;
 
@@ -110,60 +111,74 @@ export default function MapScreen({ route, navigation }: any) {
   
   
 
-  // 1a) Open Shout Modal effect
   useEffect(() => {
-    if (route.params?.openShoutModal) {
-      setModalOpen(true);
-      navigation.setParams({ openShoutModal: false });
-    }
-  }, [route.params?.openShoutModal, navigation]);
+    const unsubscribe = navigation.addListener('focus', () => {
+      // This runs every time the screen comes into focus
+      if (route.params?.openShoutModal) {
+        setModalOpen(true);
+        // Clear the param so it doesn't trigger again on the next focus
+        navigation.setParams({ openShoutModal: undefined });
+      }
+      if (route.params?.shouldRecenter) {
+        locateMe();
+        // Clear the param
+        navigation.setParams({ shouldRecenter: undefined });
+      }
+    });
 
-  // 1b) Recenter effect
+    return unsubscribe;
+  }, [navigation, route.params]); // Depend on params to re-run if they change
+
+  // 2) initial user loc + reverse‐geocode (with caching)
   useEffect(() => {
-    if (route.params?.shouldRecenter) {
-      locateMe();
-      navigation.setParams({ shouldRecenter: false });
-    }
-  }, [route.params?.shouldRecenter, navigation]);
+    let sub: Location.LocationSubscription | undefined;
 
-  // 2) initial user loc + reverse‐geocode
-  useEffect(() => {
-  let sub: Location.LocationSubscription | undefined;
+    const initializeLocation = async () => {
+      // Step A: Check the cache first.
+      if (lastKnownUserCoords) {
+        console.log('Using cached location:', lastKnownUserCoords);
+        setUserCoords(lastKnownUserCoords);
+        setMapCenter(prev => prev ?? lastKnownUserCoords); // Use cached value for initial center
+      }
 
-  (async () => {
-    // Already asked on mount, but safe to check again
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'This app needs location access.');
-      return;
-    }
+      // Step B: Always request permission and start watching for updates.
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission required', 'This app needs location access.');
+        return;
+      }
 
-    sub = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.Highest,   // or Balanced for battery
-        timeInterval: 5000,                    // 5 s between updates
-        distanceInterval: 20,                  // or every 20 m
-      },
-      ({ coords }) => {
-        const pos = { lat: coords.latitude, lng: coords.longitude };
-      setUserCoords(pos);
+      sub = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Highest,
+          timeInterval: 5000,
+          distanceInterval: 20,
+        },
+        ({ coords }) => {
+          const pos = { lat: coords.latitude, lng: coords.longitude };
+          
+          // Step C: Update the cache AND the state with the latest coordinates.
+          lastKnownUserCoords = pos; 
+          setUserCoords(pos);
 
-      // 👇 only set once, so the map won’t keep jumping
-      setMapCenter(prev => prev ?? pos);
+          // Only set map center ONCE to prevent jumping
+          setMapCenter(prev => prev ?? pos);
 
-      const js = `if (window.userMarker) window.userMarker.setLngLat([${pos.lng}, ${pos.lat}]);`;
+          const js = `if (window.userMarker) window.userMarker.setLngLat([${pos.lng}, ${pos.lat}]);`;
           if (Platform.OS === 'web') {
             setJsToInject({ code: js, timestamp: Date.now() });
           } else {
             wv.current?.injectJavaScript(`${js} true;`);
           }
-      }
-    );
-  })();
+        }
+      );
+    };
 
-  // Clean up when screen unmounts
-  return () => sub?.remove();
-}, []);
+    initializeLocation();
+
+    // Clean up the subscription when the screen unmounts
+    return () => sub?.remove();
+  }, []); // This still only needs to run once per mount.
 
   // 3) subscribe + TTL cleanup
   useEffect(() => {
@@ -200,6 +215,17 @@ export default function MapScreen({ route, navigation }: any) {
     });
     return unsub;
   }, []);
+
+  // NEW: Listen for navigation events to reset state
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('blur', () => {
+      // User is navigating away from this screen
+      console.log('MapScreen blurred, resetting ready state.');
+      setReady(false);
+    });
+
+    return unsubscribe;
+  }, [navigation]);
 
   // 4) send “visible” shouts to WebView
   useEffect(() => {
