@@ -239,51 +239,36 @@ export default function MapScreen({ route, navigation }: any) {
     return unsub;
   }, []);
 
-  // NEW: Listen for navigation events to reset state
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('blur', () => {
-      // User is navigating away from this screen
-      console.log('MapScreen blurred, resetting ready state.');
-      setReady(false);
-    });
-
-    return unsubscribe;
-  }, [navigation]);
+  
 
   // 4) send “visible” shouts to WebView
-  useEffect(() => {
-    if (!ready) return;
+ // new code: directly call addMarkers(...)
+useEffect(() => {
+  if (!ready) return;
 
-    
-
-    const payload = JSON.stringify({
-      type: 'shouts',
-      data: shouts.map(s => ({
+  // build a plain JS call to addMarkers([...])
+  const markerArray = JSON.stringify(
+    shouts.map(s => ({
       id:        s.id,
       text:      s.text,
       lat:       s.lat,
       lng:       s.lng,
       createdAt: s.createdAt,
-      likeCount: s.likeCount  || 0,
+      likeCount: s.likeCount || 0,
       radius:    s.radius,
       spotlight: s.spotlight,
       authorIsVerified: !!s.authorIsVerified,
       authorIsMerchant: !!s.authorIsMerchant,
-    })),
-  });
-    const jsString = `
-      (function() {
-        window.dispatchEvent(new MessageEvent('message', {
-          data: '${payload.replace(/'/g, "\\'")}'
-        }));
-      })();
-    `;
-    if (Platform.OS === 'web') {
-      setJsToInject({ code: jsString, timestamp: Date.now() });
-    } else {
-      wv.current?.injectJavaScript(`${jsString} true;`);
-    }
-  }, [ready, shouts]);
+    }))
+  );
+  const js = `addMarkers(${markerArray}); true;`;
+
+  if (Platform.OS === 'web') {
+    setJsToInject({ code: js, timestamp: Date.now() });
+  } else {
+    wv.current?.injectJavaScript(js);
+  }
+}, [ready, shouts]);
 
   // ← NEW: keep in sync with whatever Power-Up the backend thinks we have
   useEffect(() => {
