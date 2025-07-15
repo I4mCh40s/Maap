@@ -111,14 +111,19 @@ export default function MapScreen({ route, navigation }: any) {
   
   
 
+  // This effect handles params passed via navigation, both on focus and while focused.
   useEffect(() => {
+    // Case 1: The "+" button was pressed on the tab bar.
+    // This runs whenever route.params.openShoutModal changes.
+    if (route.params?.openShoutModal) {
+      setModalOpen(true);
+      // Clear the param immediately so it doesn't re-trigger.
+      navigation.setParams({ openShoutModal: undefined });
+    }
+
+    // Case 2: We navigated back from another screen with a recenter request.
+    // We can use a focus listener for actions that should only happen when returning to the screen.
     const unsubscribe = navigation.addListener('focus', () => {
-      // This runs every time the screen comes into focus
-      if (route.params?.openShoutModal) {
-        setModalOpen(true);
-        // Clear the param so it doesn't trigger again on the next focus
-        navigation.setParams({ openShoutModal: undefined });
-      }
       if (route.params?.shouldRecenter) {
         locateMe();
         // Clear the param
@@ -127,43 +132,58 @@ export default function MapScreen({ route, navigation }: any) {
     });
 
     return unsubscribe;
-  }, [navigation, route.params]); // Depend on params to re-run if they change
+  }, [navigation, route.params?.openShoutModal, route.params?.shouldRecenter]); // Add specific params to dependency array
 
   // 2) initial user loc + reverse‐geocode (with caching)
   useEffect(() => {
     let sub: Location.LocationSubscription | undefined;
 
     const initializeLocation = async () => {
-      // Step A: Check the cache first.
-      if (lastKnownUserCoords) {
-        console.log('Using cached location:', lastKnownUserCoords);
-        setUserCoords(lastKnownUserCoords);
-        setMapCenter(prev => prev ?? lastKnownUserCoords); // Use cached value for initial center
-      }
-
-      // Step B: Always request permission and start watching for updates.
+      // Step A: Get permissions
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission required', 'This app needs location access.');
         return;
       }
 
+      // Step B: Determine initial map center. Use cache, then last known, then current.
+      let initialCoords = lastKnownUserCoords;
+      if (!initialCoords) {
+        try {
+          const lastKnown = await Location.getLastKnownPositionAsync();
+          if (lastKnown) {
+            initialCoords = { lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude };
+          } else {
+            const current = await Location.getCurrentPositionAsync({});
+            initialCoords = { lat: current.coords.latitude, lng: current.coords.longitude };
+          }
+        } catch (e) {
+          console.error("Failed to get initial location", e);
+          Alert.alert("Location Error", "Could not determine your location.");
+          return;
+        }
+      }
+
+      // Step C: Set state based on initial position. This is the ONLY time we set mapCenter.
+      if (initialCoords) {
+        lastKnownUserCoords = initialCoords;
+        setUserCoords(initialCoords);
+        setMapCenter(initialCoords);
+      }
+
+      // Step D: Start watching for position updates to move the user dot, NOT the map center.
       sub = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.Highest,
           timeInterval: 5000,
-          distanceInterval: 20,
+          distanceInterval: 10, // A bit more responsive
         },
         ({ coords }) => {
           const pos = { lat: coords.latitude, lng: coords.longitude };
-          
-          // Step C: Update the cache AND the state with the latest coordinates.
           lastKnownUserCoords = pos; 
           setUserCoords(pos);
 
-          // Only set map center ONCE to prevent jumping
-          setMapCenter(prev => prev ?? pos);
-
+          // Only inject JS to move the marker. DO NOT call setMapCenter.
           const js = `if (window.userMarker) window.userMarker.setLngLat([${pos.lng}, ${pos.lat}]);`;
           if (Platform.OS === 'web') {
             setJsToInject({ code: js, timestamp: Date.now() });
@@ -176,9 +196,9 @@ export default function MapScreen({ route, navigation }: any) {
 
     initializeLocation();
 
-    // Clean up the subscription when the screen unmounts
     return () => sub?.remove();
-  }, []); // This still only needs to run once per mount.
+  }, []);
+
 
   // 3) subscribe + TTL cleanup
   useEffect(() => {
@@ -199,13 +219,16 @@ export default function MapScreen({ route, navigation }: any) {
             text: data.text,
             lat: data.location.latitude,
             lng: data.location.longitude,
-            authorName: data.authorName||'Anonymous',
+            authorName: data.authorName || 'Anonymous',
             ownerId: data.ownerId,
             createdAt: ts,
+            likeCount: data.likeCount || 0,
+            likedBy: data.likedBy || [],
+            radius: data.radius || 500,
+            // VVVV ADD/UPDATE THESE LINES VVVV
+            powerUp: data.powerUp || null,
+            echoExpiresAt: data.echoExpiresAt || undefined,
             spotlight: data.spotlight || false,
-            likeCount: data.likeCount||0,
-            likedBy: data.likedBy||[],
-            radius: data.radius||500,
             authorIsVerified: data.authorIsVerified ?? false,
             authorIsMerchant: data.authorIsMerchant ?? false,
           });
@@ -538,9 +561,7 @@ export default function MapScreen({ route, navigation }: any) {
               // ADD THIS LINE: Send a message to signal readiness
               postToApp(JSON.stringify({ type: 'MAP_READY' }));
 
-              // The initialShouts variable is embedded from the function parameters
-              const initialShouts = ${initialShouts};
-              addMarkers(initialShouts);
+              
             });
 
             window.addEventListener('message', handleMsg);
@@ -578,20 +599,26 @@ export default function MapScreen({ route, navigation }: any) {
   ? Math.max(0, Math.ceil((duration - (Date.now() - detailShout.createdAt)) / 60000))
   : 0;
 
-  // locateMe button
+ // locateMe button
   async function locateMe() {
-  if (!userCoords) return;
-  // just fetch a new one, no need to re-ask permission:
-  const pos = await Location.getCurrentPositionAsync({});
-  const { latitude, longitude } = pos.coords;
-  setMapCenter({ lat: latitude, lng: longitude });
+    if (!userCoords) return;
+    try {
+      const pos = await Location.getCurrentPositionAsync({});
+      const { latitude, longitude } = pos.coords;
+      
+      // DO NOT setMapCenter here. It causes a full WebView reload.
+      // setMapCenter({ lat: latitude, lng: longitude }); // <-- REMOVED
 
-  // tell the WebView to recenter…
-  const js = `map.setCenter([${longitude}, ${latitude}]); if (window.userMarker) window.userMarker.setLngLat([${longitude}, ${latitude}]);`;
-    if (Platform.OS === 'web') {
-      setJsToInject({ code: js, timestamp: Date.now() });
-    } else {
-      wv.current?.injectJavaScript(`${js} true;`);
+      // Tell the WebView to recenter using a smooth animation.
+      const js = `map.flyTo({ center: [${longitude}, ${latitude}], zoom: 15 });`;
+      if (Platform.OS === 'web') {
+        setJsToInject({ code: js, timestamp: Date.now() });
+      } else {
+        wv.current?.injectJavaScript(`${js} true;`);
+      }
+    } catch (e) {
+      console.error("locateMe failed:", e);
+      Alert.alert("Error", "Could not get current location.");
     }
   }
 
