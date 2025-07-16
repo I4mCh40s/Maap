@@ -1,7 +1,5 @@
 // src/components/TopShoutsPanel.tsx
-// Lightweight “Top Shouts nearby” overlay. Fetches the most-liked shouts
-// (likeCount > 0) within `radius` metres of the user.
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,48 +10,61 @@ import {
   Animated,
   Easing,
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons'
-import {
-  collection,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  where,
-} from 'firebase/firestore';
-import { db } from '../firebase';
-import { distanceBetween } from 'geofire-common';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
+// 1. UNIFY THE SHOUT TYPE
+// Use the same, more complete Shout type from MapScreen.tsx to ensure consistency.
+// Note the change from `likes` to `likeCount`.
 export interface Shout {
   id: string;
   text: string;
-  likes: number;
   lat: number;
   lng: number;
-  authorAvatar?: string;
+  likeCount: number; // Changed from `likes` to match MapScreen
   authorName?: string;
   authorIsMerchant?: boolean;
   authorIsVerified?: boolean;
+  // Add any other fields from MapScreen's Shout type if needed
+  // e.g., authorAvatar, ownerId, etc.
 }
 
+// 2. UPDATE THE PROPS INTERFACE
+// We now accept `shouts` and remove `userCoords` and `radius`
+// because the filtering is now done in the parent component.
 interface Props {
-  userCoords: { lat: number; lng: number } | null;
+  shouts: Shout[];
   top?: number;
-  radius?: number;
   onSelectShout?: (shout: Shout) => void;
 }
 
 export default function TopShoutsPanel({
-  userCoords,
+  shouts, // Receive the pre-filtered shouts
   top = 0,
-  radius = 500,
   onSelectShout,
 }: Props) {
-  const [shoutPool, setShoutPool] = useState<Shout[]>([]);
-  const [visibleShouts, setVisibleShouts] = useState<Shout[]>([]);
+  // 3. REMOVE UNNECESSARY STATE
+  // We no longer need to store a separate pool or visible list.
+  // const [shoutPool, setShoutPool] = useState<Shout[]>([]);
+  // const [visibleShouts, setVisibleShouts] = useState<Shout[]>([]);
+  
   const [expanded, setExpanded] = useState(false);
-
   const slide = useRef(new Animated.Value(0)).current;
+
+  // 4. REMOVE ALL DATA FETCHING AND FILTERING LOGIC
+  // The two `useEffect` hooks that fetched from Firestore and filtered by distance
+  // have been completely removed.
+
+  // 5. DERIVE TOP SHOUTS FROM PROPS USING useMemo
+  // This is efficient. It only re-sorts when the `shouts` prop changes.
+  const topVisibleShouts = useMemo(() => {
+    return [...shouts]
+      .filter(shout => shout.likeCount > 0)
+      .sort((a, b) => b.likeCount - a.likeCount) // Sort by likeCount
+      .slice(0, 5); // Take the top 5 of the visible shouts
+  }, [shouts]);
+
+
+  // Animation logic remains the same
   useEffect(() => {
     Animated.timing(slide, {
       toValue: expanded ? 1 : 0,
@@ -63,64 +74,22 @@ export default function TopShoutsPanel({
     }).start();
   }, [expanded, slide]);
 
+  // This effect now watches our derived `topVisibleShouts`
   useEffect(() => {
-    const topQ = query(
-      collection(db, 'shouts'),
-      where('likeCount', '>', 0),
-      orderBy('likeCount', 'desc'),
-      limit(20)
-    );
-
-    const unsub = onSnapshot(topQ, snap => {
-      const pool: Shout[] = [];
-      snap.forEach(doc => {
-        const d = doc.data() as any;
-        const lat: number | undefined =
-          typeof d.lat === 'number' ? d.lat : d.location?.latitude;
-        const lng: number | undefined =
-          typeof d.lng === 'number' ? d.lng : d.location?.longitude;
-        if (typeof lat !== 'number' || typeof lng !== 'number') return;
-
-        pool.push({
-          id: doc.id,
-          text: d.text || '',
-          likes: d.likeCount || 0,
-          lat,
-          lng,
-          authorAvatar: d.authorAvatar || undefined,
-          authorName: d.authorName || 'Anonymous',
-          authorIsMerchant: d.authorIsMerchant || false,
-          authorIsVerified: d.authorIsVerified || false,
-        });
-      });
-      setShoutPool(pool);
-    });
-
-    return unsub;
-  }, []);
-
-  useEffect(() => {
-    if (!userCoords) return;
-    const nearby = shoutPool
-      .filter(
-        s =>
-          distanceBetween([userCoords.lat, userCoords.lng], [s.lat, s.lng]) <=
-          radius / 1000
-      )
-      .slice(0, 5);
-    setVisibleShouts(nearby);
-  }, [userCoords, radius, shoutPool]);
-
-  useEffect(() => {
-    if (visibleShouts.length === 0) setExpanded(false);
-  }, [visibleShouts]);
+    if (topVisibleShouts.length === 0) {
+      setExpanded(false);
+    }
+  }, [topVisibleShouts]);
 
   const translateY = slide.interpolate({
     inputRange: [0, 1],
     outputRange: [-130, 0],
   });
 
-  if (!userCoords || visibleShouts.length === 0) return null;
+  // The render guard is now much simpler
+  if (topVisibleShouts.length === 0) {
+    return null;
+  }
 
   return (
     <View pointerEvents="box-none" style={[styles.container, { top }]}> 
@@ -135,7 +104,8 @@ export default function TopShoutsPanel({
       {expanded && (
         <Animated.FlatList
           style={[styles.listWrapper, { transform: [{ translateY }] }]}
-          data={visibleShouts}
+          // Use the new derived array for the list data
+          data={topVisibleShouts}
           keyExtractor={item => item.id}
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -146,41 +116,29 @@ export default function TopShoutsPanel({
               activeOpacity={0.8}
               onPress={() => onSelectShout?.(item)}
             >
-              {/* Header: avatar, username, icon */}
               <View style={styles.headerRow}>
+                {/* This assumes authorAvatar is part of your unified Shout type */}
+                {/* @ts-ignore */}
                 {item.authorAvatar && (
-                  <Image
-                    source={{ uri: item.authorAvatar }}
-                    style={styles.avatar}
-                  />
+                  // @ts-ignore
+                  <Image source={{ uri: item.authorAvatar }} style={styles.avatar} />
                 )}
                 <Text style={styles.username} numberOfLines={1}>
                   {item.authorName}
                 </Text>
                 {item.authorIsMerchant ? (
-                  <MaterialCommunityIcons
-                    name="storefront"
-                    size={18}
-                    color="#FF7043"
-                    style={styles.iconOffset}
-                  />
+                  <MaterialCommunityIcons name="storefront" size={18} color="#FF7043" style={styles.iconOffset} />
                 ) : item.authorIsVerified ? (
-                  <MaterialCommunityIcons
-                    name="check-decagram"
-                    size={18}
-                    color="#3BAEFC"
-                    style={styles.iconOffset}
-                  />
+                  <MaterialCommunityIcons name="check-decagram" size={18} color="#3BAEFC" style={styles.iconOffset} />
                 ) : null}
               </View>
 
-              {/* Shout text */}
               <Text style={styles.text} numberOfLines={2}>
                 {item.text}
               </Text>
 
-              {/* Likes */}
-              <Text style={styles.likes}>❤️ {item.likes}</Text>
+              {/* Use likeCount here */}
+              <Text style={styles.likes}>❤️ {item.likeCount}</Text>
             </TouchableOpacity>
           )}
         />
@@ -189,6 +147,7 @@ export default function TopShoutsPanel({
   );
 }
 
+// Styles remain the same
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
@@ -196,6 +155,7 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     paddingTop: 8,
+    zIndex: 10, // Ensure it's above the map
   },
   handle: {
     alignSelf: 'flex-start',

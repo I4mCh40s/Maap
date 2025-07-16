@@ -109,7 +109,21 @@ export default function MapScreen({ route, navigation }: any) {
   // … location-search center, power-up, etc …
   const [jsToInject, setJsToInject] = useState<{ code: string; timestamp: number } | undefined>();
   
-  
+  const visibleShouts = useMemo(() => {
+      // If we don't have the user's location yet, they can't see any shouts.
+      if (!userCoords) {
+        return [];
+      }
+      // Filter the main shouts list.
+      return shouts.filter(s => {
+        const distance = getDistanceMeters(
+          userCoords.lat, userCoords.lng,
+          s.lat, s.lng
+        );
+        // A shout is visible only if the user is within its radius.
+        return distance <= s.radius;
+      });
+    }, [shouts, userCoords]); // Dependencies: re-run when shouts or user's location changes. 
 
   // This effect handles params passed via navigation, both on focus and while focused.
   useEffect(() => {
@@ -241,14 +255,14 @@ export default function MapScreen({ route, navigation }: any) {
 
   
 
-  // 4) send “visible” shouts to WebView
+ // 4) send “visible” shouts to WebView
  // new code: directly call addMarkers(...)
 useEffect(() => {
   if (!ready) return;
 
   // build a plain JS call to addMarkers([...])
   const markerArray = JSON.stringify(
-    shouts.map(s => ({
+    visibleShouts.map(s => ({ // <--- USE THE FILTERED LIST
       id:        s.id,
       text:      s.text,
       lat:       s.lat,
@@ -268,7 +282,7 @@ useEffect(() => {
   } else {
     wv.current?.injectJavaScript(js);
   }
-}, [ready, shouts]);
+}, [ready, visibleShouts]); // <--- DEPEND ON THE FILTERED LIST
 
   // ← NEW: keep in sync with whatever Power-Up the backend thinks we have
   useEffect(() => {
@@ -696,7 +710,7 @@ useEffect(() => {
     )}
     {/* TOP 🔥 strip */}
     <TopShoutsPanel
-      userCoords={userCoords}
+      shouts={visibleShouts}
       top={PANEL_TOP}
       onSelectShout={s => {
         // EDIT 6: Replace injectJavaScript with setJsToInject state update.
