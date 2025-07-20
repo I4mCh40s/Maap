@@ -11,12 +11,12 @@ import {
   ActivityIndicator,
   Platform,
   StatusBar,
-  Button,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
-import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import TopShoutsPanel from '../components/TopShoutsPanel';
 
 import {
@@ -33,9 +33,11 @@ import {
   arrayUnion,
   increment,
   updateDoc,
+  where,
+  query,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import WebMapView from '../components/WebMapView'; // Adjust path as needed
+import WebMapView from '../components/WebMapView';
 
 function getDistanceMeters(
   lat1: number, lon1: number,
@@ -53,151 +55,162 @@ function getDistanceMeters(
   return R * c;
 }
 
-type Shout = {
+type PublicItem = {
   id: string;
+  type: 'shout' | 'spot';
   text: string;
   lat: number;
   lng: number;
   authorName: string;
   ownerId: string;
   createdAt: number;
+  expiresAt: Timestamp;
   likeCount: number;
   likedBy: string[];
   radius: number;
-  spotlight?: boolean;
-  powerUp?: PowerUpType; 
-  echoExpiresAt?: number; 
   authorIsVerified: boolean;
   authorIsMerchant: boolean;
 };
 
+type Pin = {
+  id: string;
+  text: string;
+  lat: number;
+  lng: number;
+  ownerId: string;
+  createdAt: number;
+};
+
 let lastKnownUserCoords: { lat: number, lng: number } | null = null;
-// If you added "streakBonus" at Spin time, include it here:
-type PowerUpType = 'Spotlight' | 'Echo' | 'Megaphone' | 'Super Like' | 'Streak Bonus' |null;
 
 export default function MapScreen({ route, navigation }: any) {
   const insets = useSafeAreaInsets();
   const GOAL_LIKES = 10;
 
-  // 0) Helpers…
   const wv = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
   const [userCoords, setUserCoords] = useState<{lat:number,lng:number}|null>(null);
   const [mapCenter, setMapCenter] = useState<{lat:number,lng:number}|null>(null);
-  const [address, setAddress] = useState('');
-  const [shouts, setShouts] = useState<Shout[]>([]);
+  
+  const [mapMode, setMapMode] = useState<'pins' | 'public'>('pins');
+  const [publicItems, setPublicItems] = useState<PublicItem[]>([]);
+  const [personalPins, setPersonalPins] = useState<Pin[]>([]);
 
-  const SEARCH_HEIGHT = 40;                // ← same value as in styles
-  const SEARCH_Y      = insets.top + 8;    // the bar’s top position
-  const PANEL_TOP     = SEARCH_Y + SEARCH_HEIGHT + 8;  // bar + small gap
+  const [createPublicItemModalOpen, setCreatePublicItemModalOpen] = useState(false);
+  const [newPublicItemText, setNewPublicItemText] = useState('');
+  const [newPublicItemType, setNewPublicItemType] = useState<'shout' | 'spot'>('shout');
 
-  // text/shout‐creation state
-  const [modalOpen, setModalOpen] = useState(false);
-  const [text, setText] = useState('');
+  const [pinCreateModalOpen, setPinCreateModalOpen] = useState(false);
+  const [newPinText, setNewPinText] = useState('');
+  const [newPinCoords, setNewPinCoords] = useState<{lat: number, lng: number} | null>(null);
+  
+  const [detailPin, setDetailPin] = useState<Pin | null>(null);
+  const [promoteChoiceModalOpen, setPromoteChoiceModalOpen] = useState(false);
+  const [promotionCoords, setPromotionCoords] = useState<{lat: number, lng: number} | null>(null);
+  const [detailItem, setDetailItem] = useState<PublicItem|null>(null);
 
-  // DETAIL modal state now explicitly Shout|null
-  const [detailShout, setDetailShout] = useState<Shout|null>(null);
-
-  //powerups
-  // ← NEW: hold what the user currently has…
-  const [userPowerUp, setUserPowerUp]       = useState<PowerUpType>(null);
-  // ← NEW: which one they're choosing to spend right now
-  const [spendPowerUp, setSpendPowerUp]     = useState<PowerUpType>(null);
-
-  // search state
   const [searchQuery, setSearchQuery] = useState('');
-  // … location-search center, power-up, etc …
   const [jsToInject, setJsToInject] = useState<{ code: string; timestamp: number } | undefined>();
   
-  const visibleShouts = useMemo(() => {
-      // If we don't have the user's location yet, they can't see any shouts.
-      if (!userCoords) {
-        return [];
-      }
-      // Filter the main shouts list.
-      return shouts.filter(s => {
-        const distance = getDistanceMeters(
-          userCoords.lat, userCoords.lng,
-          s.lat, s.lng
-        );
-        // A shout is visible only if the user is within its radius.
+  const visiblePublicItems = useMemo(() => {
+      if (!userCoords) return [];
+      return publicItems.filter(s => {
+        const distance = getDistanceMeters(userCoords.lat, userCoords.lng, s.lat, s.lng);
         return distance <= s.radius;
       });
-    }, [shouts, userCoords]); // Dependencies: re-run when shouts or user's location changes. 
+    }, [publicItems, userCoords]);
 
-  // This effect handles params passed via navigation, both on focus and while focused.
   useEffect(() => {
-    // Case 1: The "+" button was pressed on the tab bar.
-    // This runs whenever route.params.openShoutModal changes.
-    if (route.params?.openShoutModal) {
-      setModalOpen(true);
-      // Clear the param immediately so it doesn't re-trigger.
-      navigation.setParams({ openShoutModal: undefined });
-    }
+    const handleCreateModalOpen = async () => {
+      if (mapMode === 'public') {
+        setPromotionCoords(null); 
+        setNewPublicItemType('shout');
+        setCreatePublicItemModalOpen(true);
+      } 
+      else { // mapMode is 'pins'
+        try {
+          const { coords } = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          setNewPinCoords({ lat: coords.latitude, lng: coords.longitude });
+          setPinCreateModalOpen(true);
+        } catch (error) {
+          console.error("Failed to get current location for pin:", error);
+          Alert.alert("Location Error", "Could not get your current location for the pin.");
+        }
+      }
+      navigation.setParams({ openCreateModal: undefined });
+    };
 
-    // Case 2: We navigated back from another screen with a recenter request.
-    // We can use a focus listener for actions that should only happen when returning to the screen.
+    if (route.params?.openCreateModal) {
+      handleCreateModalOpen();
+    }
+  }, [route.params?.openCreateModal, mapMode, navigation]);
+
+  useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       if (route.params?.shouldRecenter) {
         locateMe();
-        // Clear the param
         navigation.setParams({ shouldRecenter: undefined });
       }
     });
-
     return unsubscribe;
-  }, [navigation, route.params?.openShoutModal, route.params?.shouldRecenter]); // Add specific params to dependency array
+  }, [navigation, route.params]);
 
-  // 2) initial user loc + reverse‐geocode (with caching)
   useEffect(() => {
     let sub: Location.LocationSubscription | undefined;
-
     const initializeLocation = async () => {
-      // Step A: Get permissions
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'This app needs location access.');
+        Alert.alert('Permission required', 'This app needs location access to work.');
         return;
       }
 
-      // Step B: Determine initial map center. Use cache, then last known, then current.
-      let initialCoords = lastKnownUserCoords;
-      if (!initialCoords) {
+      let initialCoords: { lat: number, lng: number } | null = null;
+      
+      try {
+        const highAccuracyLocation = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        initialCoords = {
+          lat: highAccuracyLocation.coords.latitude,
+          lng: highAccuracyLocation.coords.longitude,
+        };
+      } catch (error) {
+        console.warn("High-accuracy location failed, falling back...", error);
         try {
           const lastKnown = await Location.getLastKnownPositionAsync();
           if (lastKnown) {
-            initialCoords = { lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude };
+            initialCoords = {
+              lat: lastKnown.coords.latitude,
+              lng: lastKnown.coords.longitude,
+            };
           } else {
-            const current = await Location.getCurrentPositionAsync({});
-            initialCoords = { lat: current.coords.latitude, lng: current.coords.longitude };
+            const balancedLocation = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+            });
+             initialCoords = {
+              lat: balancedLocation.coords.latitude,
+              lng: balancedLocation.coords.longitude,
+            };
           }
-        } catch (e) {
-          console.error("Failed to get initial location", e);
-          Alert.alert("Location Error", "Could not determine your location.");
+        } catch (fallbackError) {
+          console.error("All location fallbacks failed.", fallbackError);
+          Alert.alert("Location Error", "Could not determine your location. Please check your device's location settings.");
           return;
         }
       }
 
-      // Step C: Set state based on initial position. This is the ONLY time we set mapCenter.
       if (initialCoords) {
         lastKnownUserCoords = initialCoords;
         setUserCoords(initialCoords);
         setMapCenter(initialCoords);
       }
-
-      // Step D: Start watching for position updates to move the user dot, NOT the map center.
+      
       sub = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.Highest,
-          timeInterval: 5000,
-          distanceInterval: 10, // A bit more responsive
-        },
+        { accuracy: Location.Accuracy.Highest, timeInterval: 5000, distanceInterval: 10 },
         ({ coords }) => {
           const pos = { lat: coords.latitude, lng: coords.longitude };
           lastKnownUserCoords = pos; 
           setUserCoords(pos);
-
-          // Only inject JS to move the marker. DO NOT call setMapCenter.
           const js = `if (window.userMarker) window.userMarker.setLngLat([${pos.lng}, ${pos.lat}]);`;
           if (Platform.OS === 'web') {
             setJsToInject({ code: js, timestamp: Date.now() });
@@ -209,1117 +222,468 @@ export default function MapScreen({ route, navigation }: any) {
     };
 
     initializeLocation();
-
     return () => sub?.remove();
   }, []);
 
-
-  // 3) subscribe + TTL cleanup
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'shouts'), snap => {
-      const now = Date.now();
-      const valid: Shout[] = [];
-      snap.docs.forEach(d => {
-        const data = d.data() as any;
-        const ts = (data.createdAt as Timestamp)?.toMillis() ?? now;
-        const ttl = (data.powerUp === 'Echo')
-        ? 2 * 60*60*1000    // Echo gives you two hours
-        : 60*60*1000;       // everybody else 60 min
-        if (now - ts > ttl) {
-          deleteDoc(d.ref);
-        } else {
-          valid.push({
+    const q = query(collection(db, 'public_items'), where('expiresAt', '>', Timestamp.now()));
+    const unsub = onSnapshot(q, 
+      (snap) => {
+        const items: PublicItem[] = snap.docs.map(d => {
+          const data = d.data();
+          return {
             id: d.id,
+            type: data.type,
             text: data.text,
             lat: data.location.latitude,
             lng: data.location.longitude,
-            authorName: data.authorName || 'Anonymous',
+            authorName: data.authorName,
             ownerId: data.ownerId,
-            createdAt: ts,
+            createdAt: (data.createdAt as Timestamp)?.toMillis() ?? Date.now(),
+            expiresAt: data.expiresAt,
             likeCount: data.likeCount || 0,
             likedBy: data.likedBy || [],
             radius: data.radius || 500,
-            // VVVV ADD/UPDATE THESE LINES VVVV
-            powerUp: data.powerUp || null,
-            echoExpiresAt: data.echoExpiresAt || undefined,
-            spotlight: data.spotlight || false,
             authorIsVerified: data.authorIsVerified ?? false,
             authorIsMerchant: data.authorIsMerchant ?? false,
-          });
-        }
-      });
-      setShouts(valid);
-    });
-    return unsub;
-  }, []);
-
-  
-
- // 4) send “visible” shouts to WebView
- // new code: directly call addMarkers(...)
-useEffect(() => {
-  if (!ready) return;
-
-  // build a plain JS call to addMarkers([...])
-  const markerArray = JSON.stringify(
-    visibleShouts.map(s => ({ // <--- USE THE FILTERED LIST
-      id:        s.id,
-      text:      s.text,
-      lat:       s.lat,
-      lng:       s.lng,
-      createdAt: s.createdAt,
-      likeCount: s.likeCount || 0,
-      radius:    s.radius,
-      spotlight: s.spotlight,
-      authorIsVerified: !!s.authorIsVerified,
-      authorIsMerchant: !!s.authorIsMerchant,
-    }))
-  );
-  const js = `addMarkers(${markerArray}); true;`;
-
-  if (Platform.OS === 'web') {
-    setJsToInject({ code: js, timestamp: Date.now() });
-  } else {
-    wv.current?.injectJavaScript(js);
-  }
-}, [ready, visibleShouts]); // <--- DEPEND ON THE FILTERED LIST
-
-  // ← NEW: keep in sync with whatever Power-Up the backend thinks we have
-  useEffect(() => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-
-    const unsub = onSnapshot(
-      doc(db, 'users', uid),
-      snap => {
-        if (snap.exists()) {
-          const data = snap.data() as any;
-          setUserPowerUp((data.powerUp as PowerUpType) || null);
-        }
+          };
+        });
+        setPublicItems(items);
       },
-      err => {
-        console.error('⛔ could not load user powerUp', err);
+      (error) => {
+        console.error("Firestore Error: Failed to fetch public items. Ensure your `public_items` collection has an index on `expiresAt`.", error);
       }
     );
-
     return unsub;
   }, []);
-  //superlike 
-  const onSuperLikePress = async () => {
-  if (!detailShout || userPowerUp !== 'Super Like') return;
 
-  const shoutRef = doc(db, 'shouts', detailShout.id);
-  await runTransaction(db, async tx => {
-    const snap = await tx.get(shoutRef);
-    if (!snap.exists()) throw new Error('Shout not found');
-    const data = snap.data() as any;
-
-    // bump its radius by 1000m
-    const currentR = data.radius || 500;
-    tx.update(shoutRef, {
-      radius: currentR + 1000
-    });
-  });
-
-  // clear your Super Like
-  await updateDoc(doc(db, 'users', auth.currentUser!.uid), {
-    powerUp: null
-  });
-
-  // optimistically update UI
-  setUserPowerUp(null);
-  setDetailShout({
-    ...detailShout,
-    radius: detailShout.radius + 1000
-  });
-};
-
-
-  // 5) Submit a new text shout
-  async function onSubmit() {
-  try {
-    if (!text.trim()) {
-      Alert.alert('Please enter a message');
-      return;
-    }
-
-    const uid = auth.currentUser!.uid;
-    if (spendPowerUp) {
-      await updateDoc(doc(db, 'users', uid), { powerUp: null });
-    }
-
-
-    const userDoc = await getDoc(doc(db, 'users', uid));
-    const isVerified = userDoc.data()?.isVerified ?? false;
-    const isMerchant = userDoc.data()?.isMerchant ?? false;
-
-    // 1) Figure out the shout’s base radius
-    let initialRadius = 500;
-      if (isMerchant) {
-        initialRadius = 750; // 👈 new: merchant radius
-      } else if (spendPowerUp === 'Streak Bonus') {
-        initialRadius = 600;
-      } else if (spendPowerUp === 'Megaphone') {
-        initialRadius = 750;
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) { setPersonalPins([]); return; }
+    const q = query(collection(db, 'pins'), where('ownerId', '==', uid));
+    const unsub = onSnapshot(q, 
+      (snap) => {
+        const pins: Pin[] = snap.docs.map(d => {
+          const data = d.data();
+          return { id: d.id, text: data.text, lat: data.location.latitude, lng: data.location.longitude, ownerId: data.ownerId, createdAt: (data.createdAt as Timestamp)?.toMillis() ?? Date.now() };
+        });
+        setPersonalPins(pins);
+      },
+      (error) => {
+        console.error("Firestore Error: Failed to fetch pins. Ensure your `pins` collection has an index on `ownerId`.", error);
       }
+    );
+    return unsub;
+  }, []);
 
-    // 2) Clear the powerUp on the user doc (if any)
-    
-
-    // 3) Build the shout payload
-    const shoutPayload: any = {
-      text:       text.trim(),
-      authorName: auth.currentUser?.displayName || 'Anonymous',
-      ownerId:    uid,
-      location:   new GeoPoint(userCoords!.lat, userCoords!.lng),
-      createdAt:  serverTimestamp(),
-      radius:     initialRadius,
-      powerUp:    spendPowerUp || null,
-      spotlight:  spendPowerUp === 'Spotlight',
-      authorIsVerified: isVerified,
-      authorIsMerchant: isMerchant,
-    };
-
-    // 4) Only add echoExpiresAt if they used the Echo
-    if (spendPowerUp === 'Echo') {
-      // double-hour lifespan
-      shoutPayload.echoExpiresAt = Date.now() + 2 * 60 * 60 * 1000;
+  useEffect(() => {
+    if (!ready) return;
+    let itemsToRender: any[] = [];
+    if (mapMode === 'public') {
+      itemsToRender = visiblePublicItems.map(item => ({ ...item, renderType: item.type }));
+    } else {
+      itemsToRender = personalPins.map(pin => ({ ...pin, renderType: 'pin' }));
     }
+    const markerArray = JSON.stringify(itemsToRender);
+    const js = `addMarkers(${markerArray});`;
+    if (Platform.OS === 'web') { setJsToInject({ code: js, timestamp: Date.now() }); } 
+    else { wv.current?.injectJavaScript(`${js} true;`); }
+  }, [ready, visiblePublicItems, personalPins, mapMode]);
 
-    // 5) Write it
-    await addDoc(collection(db, 'shouts'), shoutPayload);
+  async function onSubmitPublicItem() {
+    try {
+      if (!newPublicItemText.trim()) { Alert.alert('Please enter a message'); return; }
+      const uid = auth.currentUser!.uid;
+      const userDoc = await getDoc(doc(db, 'users', uid));
+      const isMerchant = userDoc.data()?.isMerchant ?? false;
+      const initialRadius = isMerchant ? 750 : 500;
+      let lifespanSeconds = newPublicItemType === 'spot' ? 7 * 24 * 60 * 60 : 60 * 60;
+      const expiresAt = Timestamp.fromMillis(Date.now() + lifespanSeconds * 1000);
 
-    // 6) Reset UI
-    setText('');
-    setSpendPowerUp(null);
-    setModalOpen(false);
+      const locationToUse = promotionCoords || userCoords;
+      if (!locationToUse) {
+        Alert.alert("Location Error", "Could not determine your location to post.");
+        return;
+      }
+      const location = new GeoPoint(locationToUse.lat, locationToUse.lng);
 
-  } catch (err: any) {
-    console.error('⛔ onSubmit failed:', err);
-    Alert.alert('Error creating shout', err.message);
+      const payload = {
+        type: newPublicItemType,
+        text: newPublicItemText.trim(),
+        authorName: auth.currentUser?.displayName || 'Anonymous',
+        ownerId: uid,
+        location: location,
+        createdAt: serverTimestamp(),
+        expiresAt,
+        radius: initialRadius,
+        likeCount: 0,
+        likedBy: [],
+        authorIsVerified: userDoc.data()?.isVerified ?? false,
+        authorIsMerchant: isMerchant,
+      };
+
+      await addDoc(collection(db, 'public_items'), payload);
+      setNewPublicItemText('');
+      setCreatePublicItemModalOpen(false);
+      setPromotionCoords(null); 
+    } catch (err: any) { console.error('onSubmitPublicItem failed:', err); Alert.alert('Error', err.message); }
   }
-}
 
+  async function onSubmitPin() {
+    if (!newPinText.trim() || !newPinCoords) { Alert.alert("Please enter a note."); return; }
+    try {
+      await addDoc(collection(db, 'pins'), {
+        ownerId: auth.currentUser!.uid,
+        text: newPinText.trim(),
+        location: new GeoPoint(newPinCoords.lat, newPinCoords.lng),
+        createdAt: serverTimestamp(),
+      });
+      setPinCreateModalOpen(false);
+      setNewPinText('');
+    } catch (err: any) { console.error("Failed to create pin:", err); Alert.alert("Error", "Could not save pin."); }
+  }
 
-  // 6) Handle marker-tap messages from WebView
   function onWebMessage(evt: any) {
     try {
       const msg = JSON.parse(evt.nativeEvent.data);
-      if (msg.type === 'shoutTap') {
-        const s = shouts.find(x => x.id === msg.id);
-        if (s) setDetailShout(s);
-      } 
-      // ADD THIS ELSE IF BLOCK:
-      else if (msg.type === 'MAP_READY') {
+      if (msg.type === 'publicItemTap') {
+        const item = publicItems.find(x => x.id === msg.id);
+        if (item) setDetailItem(item);
+      } else if (msg.type === 'pinTap') {
+        const pin = personalPins.find(x => x.id === msg.id);
+        if (pin) setDetailPin(pin);
+      } else if (msg.type === 'mapTap' && mapMode === 'pins') {
+        setNewPinCoords({ lat: msg.lat, lng: msg.lng });
+        setPinCreateModalOpen(true);
+      } else if (msg.type === 'MAP_READY') {
         setReady(true);
       }
     } catch {}
   }
 
-  type MiniShout = {
-  lat: number;
-  lng: number;
-  authorIsVerified: boolean;
-  authorIsMerchant: boolean;
-  };
-
-  
-
-  // 7) Build the TomTom HTML
+  // *** FUNCTION RESTORED ***
+  // MAP HTML
   const TOMTOM_KEY = 'zoyiO1lknbi8bagOcFtqev5TcihUwvbR'; 
-  function buildTomTomHtml(
-    center: { lat: number; lng: number;  },
-    shouts: MiniShout[]
-  ): string {
-    // Stringify the shouts data to safely inject it into the script
-    const initialShouts = JSON.stringify(shouts);
-
+  function buildTomTomHtml(center: { lat: number; lng: number; }): string {
     return `
         <!DOCTYPE html><html><head>
-          <meta charset="utf-8"/>
-          <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+          <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
           <script src="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps-web.min.js"></script>
           <link href="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.14.0/maps/maps.css" rel="stylesheet"/>
           <style>
             html,body,#map{margin:0;padding:0;width:100%;height:100%}
-            /* Styles remain the same */
-            .marker       {width:15px;height:15px;background:#007AFF;border:2px solid #FFF;border-radius:50%;cursor:pointer;z-index:2}
             .user-marker  {width:10px;height:10px;background:rgba(0,150,136,.8);border:2px solid #FFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,.3);transform:translate(-50%,-50%);z-index:1}
-            .verified-pin{
-              width:15px;height:15px;background:#007AFF;border:3px solid #ffffffff;border-radius:50%;cursor:pointer;z-index:2;
-              position:relative;
-            }
-            .verified-pin::after{
-              content:"";position:absolute;left:50%;top:50%;
-              width:60px;height:60px;margin:-30px 0 0 -30px;
-              border-radius:50%;background:rgba(59,174,252,.35);
-              animation:pulse 2s infinite;
-            }
-            .merchant-pin {
-              width:16px; height:16px; background:#FF7043;
-              border:2px solid #FFF;border-radius:50%;
-              cursor:pointer; z-index:2;
-            }
-            @keyframes pulse{
-              0%  {transform:scale(.2);opacity:.8}
-              70% {transform:scale(1); opacity:.1}
-              100%{transform:scale(.2);opacity:0}
-            }
+            .shout-marker {width:15px;height:15px;background:#007AFF;border:2px solid #FFF;border-radius:50%;cursor:pointer;z-index:2}
+            .spot-marker {width:18px;height:18px;background:#FFD600;border:2px solid #FFF;border-radius:50%;cursor:pointer;z-index:2; box-shadow: 0 0 8px #FFD600;}
+            .pin-marker {width: 24px; height: 24px; border-radius: 50% 50% 50% 0; background: #4CAF50; position: absolute; transform: translate(-50%, -100%) rotate(-45deg); border: 2px solid #FFF; cursor: pointer; z-index: 2;}
           </style>
-
         </head><body>
           <div id="map"></div>
           <script>
-            // --- FIX 1: Universal postMessage function ---
-            // This checks if it's running in React Native's WebView or a standard browser iframe.
-            const postToApp = (message) => {
-              if (window.ReactNativeWebView) {
-                window.ReactNativeWebView.postMessage(message);
-              } else {
-                window.parent.postMessage(message, '*');
-              }
-            };
-
-            const map = tt.map({
-              key: '${TOMTOM_KEY}',
-              container: 'map',
-              center: [${center?.lng}, ${center?.lat}],
-              zoom: 14,
-              style: "https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAMzJSMkJDa1NmTGNvR2h3RzsO9cOMFdVDGI-DPwgg0BlM.json?key=${TOMTOM_KEY}"
-            });
-
-            const userEl = document.createElement('div');
-            userEl.className = 'user-marker';
-            window.userMarker = new tt.Marker({ element: userEl })
-              .setLngLat([${center?.lng}, ${center?.lat}])
-              .addTo(map);
+            const postToApp = (message) => { window.ReactNativeWebView?.postMessage(message); };
+            const map = tt.map({ key: '${TOMTOM_KEY}', container: 'map', center: [${center?.lng}, ${center?.lat}], zoom: 14, style: "https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAMzJSMkJDa1NmTGNvR2h3RzsO9cOMFdVDGI-DPwgg0BlM.json?key=${TOMTOM_KEY}" });
+            window.userMarker = new tt.Marker({ element: document.createElement('div') }).setLngLat([${center?.lng}, ${center?.lat}]).addTo(map);
+            window.userMarker.getElement().className = 'user-marker';
+            
+            map.on('click', (e) => postToApp(JSON.stringify({ type: 'mapTap', lat: e.lngLat.lat, lng: e.lngLat.lng })));
 
             let markers = [];
-            function clearMarkers() {
+            function addMarkers(items) {
               markers.forEach(m => m.remove());
               markers = [];
-            }
-
-            function addMarkers(shouts) {
-              clearMarkers();
-              shouts.forEach(s => {
-                const likes = s.likeCount || 0;
-                const size  = 20 + Math.sqrt(likes) * 5;
+              items.forEach(item => {
                 const el = document.createElement('div');
-
-                if (s.authorIsMerchant) {
-                  el.className = 'merchant-pin';
-                } else if (s.authorIsVerified) {
-                  el.className = 'verified-pin';
-                } else {
-                  el.className = 'marker';
-                }
+                el.className = item.renderType + '-marker';
                 
-                if (s.spotlight) { el.style.boxShadow = '0 0 8px 4px rgba(62, 100, 252, 0.5)'; }
-
-                if (!s.authorIsMerchant) {
-                  el.style.width = size + 'px';
-                  el.style.height = size + 'px';
-                  if (!s.authorIsVerified) {
-                      el.style.borderRadius = (size/2) + 'px';
+                el.onclick = (event) => {
+                  event.stopPropagation();
+                  if(item.renderType === 'shout' || item.renderType === 'spot') {
+                    postToApp(JSON.stringify({ type: 'publicItemTap', id: item.id }));
+                  } else { // pin
+                    postToApp(JSON.stringify({ type: 'pinTap', id: item.id }));
                   }
-                  el.style.transform = 'translate(' + (-size/2) + 'px, ' + (-size/2) + 'px)';
-                } else {
-                  el.style.transform = 'translate(-8px, -8px)';
+                };
+
+                if(item.renderType === 'shout' || item.renderType === 'spot') {
+                    const size = 15 + Math.sqrt(item.likeCount || 0) * 4;
+                    el.style.width = size + 'px';
+                    el.style.height = size + 'px';
                 }
 
-                // Use the universal postToApp function here
-                el.onclick = () => { postToApp(JSON.stringify({ type:'shoutTap', id: s.id })); };
-
-                const m = new tt.Marker({ element: el }).setLngLat([s.lng, s.lat]).addTo(map);
+                const m = new tt.Marker({ element: el }).setLngLat([item.lng, item.lat]).addTo(map);
                 markers.push(m);
               });
             }
-
-            function handleJsInjection(e) {
-                try {
-                    const msg = JSON.parse(e.data);
-                    if (msg.type === 'EXEC_JS') {
-                        eval(msg.code);
-                    }
-                } catch (err) { /* Not a JS injection, ignore */ }
-            }
-            
-            function handleMsg(e) {
-              try {
-                const msg = JSON.parse(e.data);
-                if (msg.type === 'shouts') {
-                  addMarkers(msg.data);
-                } else if (msg.type === 'EXEC_JS') {
-                  eval(msg.code);
-                }
-              } catch (err) { /* Not a JSON message, ignore */ }
-            }
-
-            map.on('load', function() {
-              // ADD THIS LINE: Send a message to signal readiness
-              postToApp(JSON.stringify({ type: 'MAP_READY' }));
-
-              
-            });
-
-            window.addEventListener('message', handleMsg);
-            document.addEventListener('message', handleMsg);
-
+            map.on('load', () => postToApp(JSON.stringify({ type: 'MAP_READY' })));
+            document.addEventListener('message', (e) => { try { const data = JSON.parse(e.data); if(data.code) eval(data.code); } catch {} });
           </script>
         </body></html>`;
   }
-
+  
   const mapHtml = useMemo(() => {
-    if (!mapCenter) return ''; // Don't generate HTML until we have a center
-
-    // Pass an empty array for shouts. The useEffect hook will populate them after load.
-    return buildTomTomHtml(mapCenter, []);
-  }, [mapCenter]); // IMPORTANT: The dependency is ONLY mapCenter
+    if (!mapCenter) return '';
+    return buildTomTomHtml(mapCenter);
+  }, [mapCenter]);
     
-
-  if (!userCoords) {
+  if (!userCoords) { 
     return (
       <SafeAreaView style={styles.loading}>
         <ActivityIndicator size="large" />
+        <Text style={{ marginTop: 10, color: '#666' }}>Finding your location...</Text>
       </SafeAreaView>
     );
   }
 
-  // ─── NEW: compute ownership ─────────────────────────────────────────────────
-  const isOwner = detailShout?.ownerId === auth.currentUser?.uid;
+  const isOwner = detailItem?.ownerId === auth.currentUser?.uid;
+  const minutesLeft = detailItem ? Math.max(0, Math.ceil((detailItem.expiresAt.toMillis() - Date.now()) / 60000)) : 0;
 
-  // ─── NEW: compute minutesLeft for countdown ──────────────────────────────────
-  const baseDuration = 60 * 60 * 1000;
-  const duration = (detailShout?.powerUp === 'Echo')
-  ? 2 * baseDuration   // double time for Echo
-  : baseDuration;
-  const minutesLeft = detailShout
-  ? Math.max(0, Math.ceil((duration - (Date.now() - detailShout.createdAt)) / 60000))
-  : 0;
-
- // locateMe button
   async function locateMe() {
     if (!userCoords) return;
     try {
-      const pos = await Location.getCurrentPositionAsync({});
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const { latitude, longitude } = pos.coords;
-      
-      // DO NOT setMapCenter here. It causes a full WebView reload.
-      // setMapCenter({ lat: latitude, lng: longitude }); // <-- REMOVED
-
-      // Tell the WebView to recenter using a smooth animation.
       const js = `map.flyTo({ center: [${longitude}, ${latitude}], zoom: 15 });`;
-      if (Platform.OS === 'web') {
-        setJsToInject({ code: js, timestamp: Date.now() });
-      } else {
-        wv.current?.injectJavaScript(`${js} true;`);
-      }
-    } catch (e) {
-      console.error("locateMe failed:", e);
-      Alert.alert("Error", "Could not get current location.");
-    }
+      if (Platform.OS === 'web') { setJsToInject({ code: js, timestamp: Date.now() }); } 
+      else { wv.current?.injectJavaScript(`${js} true;`); }
+    } catch (e) { console.error("locateMe failed:", e); Alert.alert("Error", "Could not get current location."); }
   }
 
-  // Search
   async function onSearch() {
     if (!searchQuery.trim()) return;
     try {
-      const res = await fetch(
-        `https://api.tomtom.com/search/2/geocode/${encodeURIComponent(searchQuery)}.json?key=${TOMTOM_KEY}`
-      );
+      const res = await fetch(`https://api.tomtom.com/search/2/geocode/${encodeURIComponent(searchQuery)}.json?key=${TOMTOM_KEY}`);
       const json = await res.json();
       const pos  = json.results?.[0]?.position;
       if (pos) {
-        // ➊ remember the new center
         setMapCenter({ lat: pos.lat, lng: pos.lon });
-        // ➋ update your address bar to show the query
-        setAddress(searchQuery);
-        // ➌ inject JS so the WebView map recenters
         const recenterJS = `map.setCenter([${pos.lon}, ${pos.lat}]);`;
-        if (Platform.OS === 'web') {
-          setJsToInject({ code: recenterJS, timestamp: Date.now() });
-        } else {
-          wv.current?.injectJavaScript(`${recenterJS} true;`);
-        }
-      } else {
-        Alert.alert('Not found', 'Could not locate that address.');
-      }
-    } catch (e: any) {
-      Alert.alert('Search failed', e.message);
-    }
+        if (Platform.OS === 'web') { setJsToInject({ code: recenterJS, timestamp: Date.now() }); } 
+        else { wv.current?.injectJavaScript(`${recenterJS} true;`); }
+      } else { Alert.alert('Not found', 'Could not locate that address.'); }
+    } catch (e: any) { Alert.alert('Search failed', e.message); }
   }
 
-
-  // right before any JSX, e.g. above "return ("
   const currentUid = auth.currentUser?.uid ?? '';
-  // If detailShout is set, check if this user has already liked it:
-  const isLiked = !!detailShout && detailShout.likedBy.includes(currentUid);
+  const isLiked = !!detailItem && detailItem.likedBy.includes(currentUid);
 
   const onLikePress = async () => {
-    if (!detailShout || isLiked) return;
-    const r = doc(db,'shouts',detailShout.id);
+    if (!detailItem || isLiked) return;
+    const itemRef = doc(db, 'public_items', detailItem.id);
     await runTransaction(db, async tx => {
-      const snap = await tx.get(r);
+      const snap = await tx.get(itemRef);
       const data = snap.data() as any;
-      if ((data.likedBy||[]).includes(currentUid)) return;
-      tx.update(r, {
-        likedBy:   arrayUnion(currentUid),
-        likeCount: increment(1)
-      });
+      if ((data.likedBy || []).includes(currentUid)) return;
+      const updates: any = {
+        likedBy: arrayUnion(currentUid),
+        likeCount: increment(1),
+        radius: increment(100)
+      };
+      if (data.type === 'spot') {
+        const oneDayInSeconds = 24 * 60 * 60;
+        updates.expiresAt = new Timestamp(data.expiresAt.seconds + oneDayInSeconds, data.expiresAt.nanoseconds);
+      }
+      tx.update(itemRef, updates);
     });
-    // **optimistic update** so UI flips immediately:
-    setDetailShout(d => d
-      ? {...d, likeCount: d.likeCount+1, likedBy: [...d.likedBy,currentUid]}
-      : d
-    );
   };
-  const onDeletePress = async () => {
-    if (!detailShout) return;
+
+  const onDeletePublicItem = async () => {
+    if (!detailItem) return;
     try {
-      await deleteDoc(doc(db, 'shouts', detailShout.id));
-      setDetailShout(null);
-    } catch (e: any) {
-      Alert.alert('Error deleting shout', e.message);
-    }
+      await deleteDoc(doc(db, 'public_items', detailItem.id));
+      setDetailItem(null);
+    } catch (e: any) { Alert.alert('Error deleting item', e.message); }
   };
+
+  const onDeletePin = async () => {
+    if (!detailPin) return;
+    try {
+      await deleteDoc(doc(db, 'pins', detailPin.id));
+      setDetailPin(null);
+    } catch (e: any) { Alert.alert('Error deleting pin', e.message); }
+  };
+
+  const onPromotePin = () => {
+    if (!detailPin) return;
+    setNewPublicItemText(detailPin.text);
+    setPromotionCoords({ lat: detailPin.lat, lng: detailPin.lng });
+    setDetailPin(null);
+    setPromoteChoiceModalOpen(true);
+  };
+
+  const handlePromoteChoice = (type: 'shout' | 'spot') => {
+    setNewPublicItemType(type);
+    setPromoteChoiceModalOpen(false);
+    setCreatePublicItemModalOpen(true);
+  };
+
+  const screenHeight = Dimensions.get('window').height;
+  const toggleContainerHeight = 48 + 1 + 48; 
+  const verticalCenterOffset = (screenHeight / 2) - (toggleContainerHeight / 2);
 
   return (
     <SafeAreaView style={{ flex: 1 }}>
-
-    {/* ─── Map / WebView ──────────────────────────────── */}
-    {mapCenter && (
-      Platform.OS === 'web' ? (
-        <WebMapView
-          // --- CHANGE THIS LINE ---
-          html={mapHtml} 
-          onMessage={onWebMessage}
-          jsToInject={jsToInject}
-        />
-      ) : (
-        <WebView
-          ref={wv}
-          // --- AND CHANGE THIS LINE ---
-          source={{ html: mapHtml }}
-          originWhitelist={['*']}
-          onLoadEnd={() => setReady(true)}
-          onMessage={onWebMessage}
-          style={styles.webview}
-        />
-      )
-    )}
-    {/* TOP 🔥 strip */}
-    <TopShoutsPanel
-      shouts={visibleShouts}
-      top={PANEL_TOP}
-      onSelectShout={s => {
-        // EDIT 6: Replace injectJavaScript with setJsToInject state update.
-        const js = `map.flyTo({ center: [${s.lng}, ${s.lat}], zoom: 17 });`;
-        if (Platform.OS === 'web') {
-          setJsToInject({ code: js, timestamp: Date.now() });
-        } else {
-          wv.current?.injectJavaScript(`${js} true;`);
-        }
-      }}
-    />
-    {/* ─── Floating Search Pill ───────────────────────── */}
-    <View style={[
-          styles.searchBar,
-          { top: SEARCH_Y },            // status-bar height + margin
-        ]}>
-      <TextInput
-        style={styles.searchInput}
-        placeholder="Search location"
-        value={searchQuery}
-        onChangeText={setSearchQuery}
-        returnKeyType="search"
-        onSubmitEditing={onSearch}
-      />
-      <TouchableOpacity style={styles.searchButton} onPress={onSearch}>
-        <Text style={styles.searchButtonText}>GO</Text>
-      </TouchableOpacity>
-    </View>
-    
-    {/* ─── Locate-Me Button ────────────────────────── */}
-      <TouchableOpacity
-        style={[styles.locateButton,
-          { bottom: insets.bottom + 80 }]}
-        onPress={locateMe}
-      >
+      {mapCenter && (
+        Platform.OS === 'web' ? (
+          <WebMapView html={mapHtml} onMessage={onWebMessage} jsToInject={jsToInject} />
+        ) : (
+          <WebView ref={wv} source={{ html: mapHtml }} originWhitelist={['*']} onLoadEnd={() => setReady(true)} onMessage={onWebMessage} style={styles.webview} />
+        )
+      )}
+      
+      {mapMode === 'public' && <TopShoutsPanel shouts={visiblePublicItems} top={insets.top + 50} onSelectShout={(item) => {
+        const js = `map.flyTo({ center: [${item.lng}, ${item.lat}], zoom: 17 });`;
+        if (Platform.OS === 'web') { setJsToInject({ code: js, timestamp: Date.now() }); } 
+        else { wv.current?.injectJavaScript(`${js} true;`); }
+      }} />}
+      
+      <View style={[styles.searchBar, { top: insets.top + 8 }]}>
+        <TextInput style={styles.searchInput} placeholder="Search location" value={searchQuery} onChangeText={setSearchQuery} returnKeyType="search" onSubmitEditing={onSearch} />
+        <TouchableOpacity style={styles.searchButton} onPress={onSearch}><Text style={styles.searchButtonText}>GO</Text></TouchableOpacity>
+      </View>
+      
+      <TouchableOpacity style={[styles.locateButton, { bottom: insets.bottom + 80 }]} onPress={locateMe}>
         <MaterialIcons name="my-location" size={24} color="#333" />
       </TouchableOpacity>
 
-      {/* ─── Spin Button ────────────────────────── */}
-      <TouchableOpacity
-        onPress={() => navigation.navigate('PowerUp')}
-        style={[styles.spinButton,
-          { bottom: insets.bottom + 80 }]}
-      >
-      <MaterialCommunityIcons
-        name="dice-multiple"
-        size={24}
-        color="#fff"
-      />
-      </TouchableOpacity>
-
-    
-
-    {/* ─── Detail “Shout” Modal ───────────────────────── */}
-    <Modal visible={!!detailShout} transparent animationType="fade">
-      <View style={StyleSheet.absoluteFill}>
-      <View style={styles.backdrop}>
-        <View style={styles.modalCard}>
-          {/* close “X” */}
-          <TouchableOpacity
-            onPress={() => setDetailShout(null)}
-            style={styles.closeButton}
-          >
-            <MaterialCommunityIcons name="close" size={24} />
-          </TouchableOpacity>
-
-          {/* avatar + title row */}
-          <View style={styles.header}>
-            <View style={styles.avatarPlaceholder}>
-              <Text style={styles.avatarText}>
-                {detailShout?.authorName.charAt(0)}
-              </Text>
-            </View>
-
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={styles.modalTitle}>
-              {detailShout?.authorName}
-            </Text>
-
-            {detailShout?.authorIsMerchant ? (
-              <MaterialCommunityIcons
-                name="storefront"            // merchant icon
-                size={18}
-                color="#FF7043"              // your merchant color
-                style={{ marginLeft: 4, transform: [{ translateY: -6 }] }}
-              />
-            ) : detailShout?.authorIsVerified ? (
-              <MaterialCommunityIcons
-                name="check-decagram"        // verified icon
-                size={18}
-                color="#3BAEFC"
-                style={{ marginLeft: 4, transform: [{ translateY: -6 }] }}
-              />
-            ) : null}
-
-            <Text style={styles.modalTitle}> shouted</Text>
-          </View>
-          </View>
-
-          {/* the shout text */}
-          <Text style={styles.message}>{detailShout?.text}</Text>
-
-          {/* expires info */}
-          <TouchableOpacity>
-            <Text style={styles.expiresText}>
-              Expires in {minutesLeft} minute{minutesLeft === 1 ? '' : 's'}
-            </Text>
-            
-            {/* ─── mini progress bar ─────────────────── */}
-            <View style={styles.progressContainer}>
-              {/* background track */}
-              <View style={styles.progressBarBackground}>
-                {/* colored fill: width = (likes / GOAL) * 100% */}
-                <View
-                  style={[
-                    styles.progressBarFill,
-                    {
-                      width: `${Math.min(
-                        (detailShout?.likeCount ?? 0) / GOAL_LIKES * 100,
-                        100
-                      )}%`,
-                    },
-                  ]}
-                />
-              </View>
-
-              {/* label on the right */}
-              <Text style={styles.progressLabel}>
-                {Math.min(detailShout?.likeCount ?? 0, GOAL_LIKES)}/{GOAL_LIKES} Likes
-              </Text>
-            </View>
-
-          </TouchableOpacity>
-
-          {/* actions: like / delete */}
-          <View style={styles.actionsRow}>
-            <TouchableOpacity
-              onPress={onLikePress}
-              disabled={isLiked}
-              style={styles.actionButton}
-            >
-              <MaterialCommunityIcons
-                name={isLiked ? 'heart' : 'heart-outline'}
-                size={20}
-                color={isLiked ? '#E53935' : '#333'}
-              />
-              <Text style={styles.actionLabel}>
-                {isLiked ? 'Liked' : 'Like'}
-              </Text>
-            </TouchableOpacity>
-
-            {isOwner && (
-              <TouchableOpacity
-                onPress={onDeletePress}
-                style={[styles.actionButton, styles.deleteButton]}
-              >
-                <MaterialCommunityIcons
-                  name="trash-can-outline"
-                  size={20}
-                  color="#E53935"
-                />
-                <Text style={[styles.actionLabel, { color: '#E53935' }]}>
-                  Delete
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          {userPowerUp === 'Super Like' && detailShout?.ownerId !== auth.currentUser?.uid && (
-          <Button
-            title="🎉 Super Like!"
-            color="#E53935"
-            onPress={onSuperLikePress}
-          />
-        )}
-        </View>
-        </View>
-      </View>
-    </Modal>
-
-    {/* ─── New Shout Modal ───────────────────────────── */}
-    <Modal visible={modalOpen} transparent animationType="fade">
-      <View style={StyleSheet.absoluteFill}>
-      <View style={styles.backdrop}>
-        <View style={styles.modalCard}>
-          {/* Close “X” */}
-          <TouchableOpacity
-            onPress={() => setModalOpen(false)}
-            style={styles.closeButton}
-          >
-            <MaterialCommunityIcons name="close" size={24} />
-          </TouchableOpacity>
-
-          <Text style={styles.modalTitle}>Your Shout</Text>
-
-          <TextInput
-            style={styles.messageInput}
-            placeholder="What's new?"
-            value={text}
-            onChangeText={setText}
-            multiline
-          />
-          {/* ← NEW: if user has a powerUp, offer to spend it */}
-            {userPowerUp && !spendPowerUp && (
-              <Text style={styles.powerUpLabel}>
-                Power-Up: {userPowerUp}
-              </Text>
-            )}
-
-            {/* ← NEW: confirmation of chosen powerUp */}
-            {spendPowerUp && (
-              <Text style={styles.chosenPowerUp}>
-                Using power-up: {spendPowerUp}
-              </Text>
-            )}
-          {/* Power-Up Row (Floating) - now INSIDE the modal, above actions */}
-          <View style={styles.powerUpFloatingRow}>
-    {(['Spotlight', 'Echo', 'Megaphone', 'Super Like', 'Streak Bonus'] as const).map((type) => {
-      // Choose icon and color for each powerup
-      let iconName: keyof typeof MaterialCommunityIcons.glyphMap;
-      let color = '#B0B0B0'; // gray for disabled
-      let isActive = userPowerUp === type;
-
-      switch (type) {
-        case 'Spotlight':
-          iconName = 'spotlight-beam';
-          color = isActive ? '#FFD600' : '#B0B0B0';
-          break;
-        case 'Echo':
-          iconName = 'volume-high';
-          color = isActive ? '#00B8D4' : '#B0B0B0';
-          break;
-        case 'Megaphone':
-          iconName = 'bullhorn';
-          color = isActive ? '#FF7043' : '#B0B0B0';
-          break;
-        case 'Super Like':
-          iconName = 'heart-multiple';
-          color = isActive ? '#E53935' : '#B0B0B0';
-          break;
-        case 'Streak Bonus':
-          iconName = 'fire';
-          color = isActive ? '#FF9100' : '#B0B0B0';
-          break;
-        default:
-          iconName = 'help-circle-outline';
-      }
-
-      return (
-        <TouchableOpacity
-          key={type}
-          style={styles.powerUpIconButton}
-          disabled={!isActive}
-          onPress={() => {
-            if (isActive) setSpendPowerUp(type as PowerUpType);
-          }}
-        >
-          <MaterialCommunityIcons
-            name={iconName}
-            size={32}
-            color={color}
-            style={!isActive && { opacity: 0.5 }}
-          />
+      <View style={[styles.layerToggleContainer, { top: verticalCenterOffset }]}>
+        <TouchableOpacity style={[styles.layerToggleButton, mapMode === 'public' && styles.layerToggleButtonActive]} onPress={() => setMapMode('public')}>
+          <MaterialCommunityIcons name="earth" size={24} color={mapMode === 'public' ? '#FFF' : '#333'} />
         </TouchableOpacity>
-      );
-    })}
-  </View>
+        <View style={styles.layerToggleSeparator} />
+        <TouchableOpacity style={[styles.layerToggleButton, mapMode === 'pins' && styles.layerToggleButtonActive]} onPress={() => setMapMode('pins')}>
+          <MaterialCommunityIcons name="map-marker" size={24} color={mapMode === 'pins' ? '#FFF' : '#333'} />
+        </TouchableOpacity>
+      </View>
 
-          <View style={styles.actionsRow}>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => setModalOpen(false)}
-            >
+      <Modal visible={!!detailItem} transparent animationType="fade">
+        <View style={styles.backdrop}>
+          <View style={styles.modalCard}>
+            <TouchableOpacity onPress={() => setDetailItem(null)} style={styles.closeButton}><MaterialCommunityIcons name="close" size={24} /></TouchableOpacity>
+            <View style={styles.header}><Text style={styles.modalTitle}>{detailItem?.authorName} {detailItem?.type === 'shout' ? 'shouted' : 'spotted'}</Text></View>
+            <Text style={styles.message}>{detailItem?.text}</Text>
+            <Text style={styles.expiresText}>Expires in {minutesLeft} minute{minutesLeft === 1 ? '' : 's'}</Text>
+            <View style={styles.actionsRow}>
+              <TouchableOpacity onPress={onLikePress} disabled={isLiked} style={styles.actionButton}>
+                <MaterialCommunityIcons name={isLiked ? 'heart' : 'heart-outline'} size={20} color={isLiked ? '#E53935' : '#333'} />
+                <Text style={styles.actionLabel}>{isLiked ? 'Liked' : 'Like'}</Text>
+              </TouchableOpacity>
+              {isOwner && (
+                <TouchableOpacity onPress={onDeletePublicItem} style={[styles.actionButton]}>
+                  <MaterialCommunityIcons name="trash-can-outline" size={20} color="#E53935" />
+                  <Text style={[styles.actionLabel, { color: '#E53935' }]}>Delete</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={createPublicItemModalOpen} transparent animationType="fade">
+        <View style={styles.backdrop}>
+          <View style={styles.modalCard}>
+            <TouchableOpacity onPress={() => setCreatePublicItemModalOpen(false)} style={styles.closeButton}><MaterialCommunityIcons name="close" size={24} /></TouchableOpacity>
+            <Text style={styles.modalTitle}>New Public {newPublicItemType === 'shout' ? 'Shout' : 'Spot'}</Text>
+            <TextInput style={styles.messageInput} placeholder="What's new?" value={newPublicItemText} onChangeText={setNewPublicItemText} multiline />
+            <View style={styles.actionsRow}>
+              <TouchableOpacity style={styles.actionButton} onPress={() => setCreatePublicItemModalOpen(false)}><Text style={styles.actionLabel}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.actionButton, styles.shoutButton]} onPress={onSubmitPublicItem}><Text style={[styles.actionLabel, { color: '#fff' }]}>Post</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={pinCreateModalOpen} transparent animationType="fade">
+        <View style={styles.backdrop}>
+          <View style={styles.modalCard}>
+            <TouchableOpacity onPress={() => { setPinCreateModalOpen(false); setNewPinText(''); }} style={styles.closeButton}><MaterialCommunityIcons name="close" size={24} /></TouchableOpacity>
+            <Text style={styles.modalTitle}>New Personal Pin</Text>
+            <TextInput style={styles.messageInput} placeholder="Note, reminder, memory..." value={newPinText} onChangeText={setNewPinText} multiline />
+            <View style={styles.actionsRow}>
+              <TouchableOpacity style={styles.actionButton} onPress={() => { setPinCreateModalOpen(false); setNewPinText(''); }}><Text style={styles.actionLabel}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.actionButton, styles.shoutButton]} onPress={onSubmitPin}><Text style={[styles.actionLabel, { color: '#fff' }]}>Save Pin</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!detailPin} transparent animationType="fade">
+        <View style={styles.backdrop}>
+          <View style={styles.modalCard}>
+            <TouchableOpacity onPress={() => setDetailPin(null)} style={styles.closeButton}><MaterialCommunityIcons name="close" size={24} /></TouchableOpacity>
+            <Text style={styles.modalTitle}>Personal Pin</Text>
+            <Text style={styles.message}>{detailPin?.text}</Text>
+            <View style={styles.actionsRow}>
+              <TouchableOpacity onPress={onDeletePin} style={styles.actionButton}>
+                <MaterialCommunityIcons name="trash-can-outline" size={20} color="#E53935" />
+                <Text style={[styles.actionLabel, { color: '#E53935' }]}>Delete</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={onPromotePin} style={[styles.actionButton, styles.shoutButton]}>
+                <MaterialCommunityIcons name="bullhorn-outline" size={20} color="#fff" />
+                <Text style={[styles.actionLabel, { color: '#fff' }]}>Share Publicly</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={promoteChoiceModalOpen} transparent animationType="fade">
+        <View style={styles.backdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>How to Share?</Text>
+            <Text style={styles.message}>Share as a temporary Shout that expires, or a lasting Spot that gets renewed by community likes?</Text>
+            <TouchableOpacity style={[styles.choiceButton, {backgroundColor: '#007AFF'}]} onPress={() => handlePromoteChoice('shout')}>
+              <Text style={styles.choiceButtonText}>Shout (1 Hour)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.choiceButton, {backgroundColor: '#FFD600'}]} onPress={() => handlePromoteChoice('spot')}>
+              <Text style={[styles.choiceButtonText, {color: '#000'}]}>Spot (Lasting)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.actionButton, {marginTop: 12}]} onPress={() => setPromoteChoiceModalOpen(false)}>
               <Text style={styles.actionLabel}>Cancel</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionButton, styles.shoutButton]}
-              onPress={onSubmit}
-            >
-              <Text style={[styles.actionLabel, { color: '#fff' }]}>
-                Shout!
-              </Text>
-            </TouchableOpacity>
           </View>
         </View>
-      </View>
-      </View>
-    </Modal>
-  </SafeAreaView>
-
+      </Modal>
+    </SafeAreaView>
   );
 }
 
-const barHeight = Platform.OS === 'android'
-  ? (StatusBar.currentHeight ?? 0)
-  : 0;
-
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0, },
-  loading: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center', },
+  webview: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, zIndex: 0, },
+  backdrop: { ...StyleSheet.absoluteFillObject, flex: 1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', },
+  modalCard: { width: '90%', backgroundColor:'#FFF', borderRadius: 12, padding: 20, position: 'relative', },
+  closeButton: { position: 'absolute', top: 12, right: 12, zIndex: 1, },
+  header: { flexDirection: 'row', alignItems:  'center', marginBottom: 12, justifyContent: 'center' },
+  modalTitle: { fontSize: 20, fontWeight: '600', marginBottom: 16, textAlign: 'center', },
+  message: { fontSize: 16, marginBottom: 12, color: '#333', textAlign: 'center', lineHeight: 22 },
+  expiresText: { fontSize: 14, color: '#5B3EFC', marginBottom: 20, textAlign: 'center' },
+  actionsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, },
+  actionButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: '#EEE', borderRadius: 8, marginHorizontal: 4, },
+  actionLabel: { marginLeft: 6, fontSize: 16, fontWeight: '500', color: '#333', },
+  searchBar: { position: 'absolute', top: Platform.OS === 'android' ? StatusBar.currentHeight! + 8 : 44, left: 16, right: 16, height: 40, flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 8, overflow: 'hidden', elevation: 3, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, zIndex: 10, },
+  searchInput: { flex: 1, paddingHorizontal: 12, fontSize: 16, backgroundColor: 'transparent', },
+  searchButton: { width: 50, alignItems: 'center', justifyContent: 'center', backgroundColor: '#007AFF', },
+  searchButtonText: { color: '#FFF', fontWeight: '600', fontSize: 16, },
+  messageInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, padding: 12, minHeight: 80, textAlignVertical: 'top', marginBottom: 16, },
+  shoutButton: { backgroundColor: '#1976FF', },
+  locateButton: { position: 'absolute', right: 16, width: 48, height: 48, borderRadius: 24, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', elevation: 3, shadowColor: '#000', shadowOpacity: 0.2, shadowOffset: { width: 0, height: 2 }, shadowRadius: 3, zIndex: 10, bottom: 80 },
+  layerToggleContainer: { 
+    position: 'absolute', 
+    right: 16, 
+    backgroundColor: '#fff', 
+    borderRadius: 24, 
+    elevation: 4, 
+    shadowColor: '#000', 
+    shadowOpacity: 0.2, 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowRadius: 3, 
+    overflow: 'hidden', 
+    flexDirection: 'column', 
   },
-  addressBar: {
-    padding: 12,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderColor: '#EEE',
-  },
-  webview: {
-    position: 'absolute',
-    top:      0,
-    bottom:   0,
-    left:     0,
-    right:    0,
-    zIndex:   0,      // explicitly low
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    padding: 16,
-  },
-  detail: {
-    backgroundColor: '#FFF',
-    borderRadius: 8,
-    padding: 16,
-  },
-  detailTitle: {
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  detailText: {
-    marginBottom: 8,
-  },
-  countdown: {
-    marginBottom: 12,
-    fontSize: 14,                    // a bit smaller
-    color: 'rgba(0,0,0,0.5)',        // 60% opacity black
-    // fontStyle: 'italic',          // (optional) give it an italic flair 
-  },
-  modal: {
-    backgroundColor: '#FFF',
-    borderRadius: 8,
-    padding: 16,
-  },
-  /* modalTitle: {
-    fontSize: 18,
-    marginBottom: 12,
-  }, */
-  input: {
-    borderWidth: 1,
-    borderColor: '#CCC',
-    borderRadius: 8,
-    padding: 8,
-    marginBottom: 12,
-    height: 80,
-    textAlignVertical: 'top',
-  },
-  buttonsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 12,
-  },
-  /* searchBar: {
-    flexDirection: 'row',
-    padding: 8,
-    backgroundColor: '#FFF',
-    alignItems: 'center',
-  }, */
-  searchInput: {
-    flex: 1,
-    paddingHorizontal: 12,
-    fontSize: 16,
-    backgroundColor: 'transparent',
-  },
-  
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    flex:           1,
-    backgroundColor:'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems:     'center',
-  },
-  modalCard: {
-    width:          '90%',
-    backgroundColor:'#FFF',
-    borderRadius:   12,
-    padding:        20,
-    position:       'relative',  // so closeButton can be absolute
-  },
-  closeButton: {
-    position: 'absolute',
-    top:      12,
-    right:    12,
-    zIndex:   1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems:  'center',
-    marginBottom: 12,
-  },
-  avatarPlaceholder: {
-    backgroundColor: '#EEE',
-    width: 40, height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  avatarText: {
-    fontSize: 18,
-    color: '#555',
-  },
-  modalTitle: {
-    fontSize:   20,
-    fontWeight: '600',
-    marginBottom: 16,
-    textAlign:   'center',
-  },
-  message: {
-    fontSize: 16,
-    marginBottom: 12,
-    color: '#333',
-  },
-  expiresText: {
-    fontSize: 14,
-    color: '#5B3EFC',
-    marginBottom: 20,
-  },
-  actionsRow: {
-    flexDirection:  'row',
-    justifyContent: 'space-between',
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',       // ← lay items out in a row
-    alignItems: 'center',       // ← vertically center icon+text
-    justifyContent: 'center',
-    paddingVertical: 6,         // ← slim it down
-    paddingHorizontal: 12,      // ← give some side padding
-    backgroundColor: '#EEE',
-    borderRadius: 6,
-    marginHorizontal: 4,
-  },
-  actionLabel: {
-    marginLeft: 6,              // ← space between icon & text
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#333',
-  },
-  deleteButton: {
-    marginLeft: 24,
-  },
-  searchBar: {
-    position: 'absolute',
-    top: Platform.OS === 'android'
-      ? StatusBar.currentHeight! + 8
-      : 8,
-    left: 16,
-    right: 16,
-    height: 40,
-    flexDirection: 'row',
-    backgroundColor: '#FFF',
-    borderRadius: 8,
-    overflow: 'hidden',
-    elevation: 3,          // Android shadow
-    shadowColor: '#000',   // iOS shadow
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    zIndex: 10,
-  },
-  topSafeArea: {
-    backgroundColor: '#FFF',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
-  },
-  searchButton: {
-    width: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#007AFF',
-  },
-  searchButtonText: {
-    color: '#FFF',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  messageInput: {
-    borderWidth:   1,
-    borderColor:   '#DDD',
-    borderRadius:  8,
-    padding:       12,
-    minHeight:     80,
-    textAlignVertical: 'top',
-    marginBottom:  16,
-  },
-  shoutButton: {
-    backgroundColor: '#1976FF', // same blue you use elsewhere
-  },
-  progressBarContainer: {
-  width:          '100%',
-  height:         6,
-  backgroundColor:'#EEE',
-  borderRadius:   3,
-  overflow:       'hidden',
-  marginVertical: 8,
-},
-progressBarFill: {
-  height:         6,
-  backgroundColor:'#5B3EFC',
-},
-progressLabel: {
-  fontSize: 12,
-  color:    '#555',
-  textAlign:'right',
-  marginBottom: 4,
-},
-progressContainer: {
-    marginVertical: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  progressBarBackground: {
-    flex: 1,
-    height: 6,
-    backgroundColor: '#EEE',
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginRight: 8,
-  },
-  locateButton: {
-    position: 'absolute',
-    bottom: 100,
-    right: 16,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 3,            // Android shadow
-    shadowColor: '#000',     // iOS shadow
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 3,
-    zIndex: 10,
-  },
-    spinButton: {
-    position:   'absolute',
-    bottom:     100,     // just above your + button
-    left:       16,
-    
-    width:      48,
-    height:     48,
-    borderRadius: 24,
-    backgroundColor: '#181C2F',
-    justifyContent:  'center',
-    alignItems:     'center',
-    elevation:      5,  // Android shadow
-    shadowColor:   '#000',
-    shadowOpacity: 0.25,
-    shadowRadius:  4,
-    shadowOffset:  { width: 0, height: 2 },
-  },
-  powerUpRow: {
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    marginBottom: 8,
-    width: '100%',
-  },
-  powerUpButton: {
-    alignSelf: 'stretch',
-    marginTop: 6,
-    marginBottom: 8,
-  },
-  powerUpLabel: {
-    fontSize: 14,
-    color: '#333',
-  },
-  chosenPowerUp: {
-    fontSize: 14,
-    color: '#007AFF',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  powerUpFloatingRow: {
-    // REMOVE position, left, right, bottom, zIndex, marginHorizontal
-    flexDirection: 'row',
-    justifyContent: 'space-evenly',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    borderRadius: 12,
-    marginBottom: 12, // add spacing above the action buttons
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
-  },
-  powerUpIconButton: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 4,
-    opacity: 1,
-  },
-  
+  layerToggleButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', },
+  layerToggleButtonActive: { backgroundColor: '#5B3EFC', },
+  layerToggleSeparator: { width: '80%', height: 1, backgroundColor: '#EEE', alignSelf: 'center', },
+  choiceButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginBottom: 8, },
+  choiceButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });

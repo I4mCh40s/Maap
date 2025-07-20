@@ -84,10 +84,10 @@ export default function AppTabs() {
         ]} pointerEvents="box-none">
           <View style={styles.plusCutout} />
           <TouchableOpacity
-            style={[styles.plusButton, { bottom: 12 }]}
+            style={[styles.plusButton, { bottom: 12 }]} 
             activeOpacity={0.8}
             onPress={() => {
-              navigation.navigate('Home', { screen: 'Map', params: { openShoutModal: true } });
+              navigation.navigate('Home', { screen: 'Map', params: { openCreateModal: true } });
             }}
           >
             <MaterialCommunityIcons name="plus" size={32} color="#fff" />
