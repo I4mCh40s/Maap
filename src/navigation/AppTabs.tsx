@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     height: 64,                 // visible height
     backgroundColor: '#0F1325',
-    borderRadius: 24,
+    borderRadius: 12,
     shadowColor: '#000',
     shadowOpacity: 0.15,
     shadowRadius: 8,

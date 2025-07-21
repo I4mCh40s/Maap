@@ -12,6 +12,7 @@ import {
   Platform,
   StatusBar,
   Dimensions,
+  FlatList
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -35,6 +36,7 @@ import {
   updateDoc,
   where,
   query,
+  orderBy,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import WebMapView from '../components/WebMapView';
@@ -81,6 +83,8 @@ type Pin = {
   createdAt: number;
 };
 
+type PinList = { id: string; name: string; }; // Simple type for lists
+
 let lastKnownUserCoords: { lat: number, lng: number } | null = null;
 
 export default function MapScreen({ route, navigation }: any) {
@@ -103,6 +107,9 @@ export default function MapScreen({ route, navigation }: any) {
   const [pinCreateModalOpen, setPinCreateModalOpen] = useState(false);
   const [newPinText, setNewPinText] = useState('');
   const [newPinCoords, setNewPinCoords] = useState<{lat: number, lng: number} | null>(null);
+
+  const [userPinLists, setUserPinLists] = useState<PinList[]>([]);
+  const [selectedListIds, setSelectedListIds] = useState<string[]>([]);
   
   const [detailPin, setDetailPin] = useState<Pin | null>(null);
   const [promoteChoiceModalOpen, setPromoteChoiceModalOpen] = useState(false);
@@ -144,6 +151,37 @@ export default function MapScreen({ route, navigation }: any) {
       handleCreateModalOpen();
     }
   }, [route.params?.openCreateModal, mapMode, navigation]);
+
+  // FIX: Add this new useEffect to handle the "fly-to" request
+    useEffect(() => {
+        if (route.params?.flyToCoords) {
+            const { lat, lng } = route.params.flyToCoords;
+
+            // Use a higher zoom level to focus on the specific pin
+            const js = `map.flyTo({ center: [${lng}, ${lat}], zoom: 17, essential: true });`;
+
+            if (Platform.OS === 'web') {
+                setJsToInject({ code: js, timestamp: Date.now() });
+            } else {
+                wv.current?.injectJavaScript(`${js} true;`);
+            }
+
+            // IMPORTANT: Clear the param so it doesn't run again on re-render
+            navigation.setParams({ flyToCoords: undefined });
+        }
+    }, [route.params?.flyToCoords]); // This effect runs only when flyToCoords changes
+
+  // NEW useEffect to fetch the user's pin lists for the modal
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const q = query(collection(db, 'pin_lists'), where('ownerId', '==', uid), orderBy('name', 'asc'));
+    const unsub = onSnapshot(q, snap => {
+        const lists = snap.docs.map(d => ({ id: d.id, name: d.data().name }));
+        setUserPinLists(lists);
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
@@ -329,6 +367,7 @@ export default function MapScreen({ route, navigation }: any) {
     } catch (err: any) { console.error('onSubmitPublicItem failed:', err); Alert.alert('Error', err.message); }
   }
 
+  // MODIFIED ACTION: Submit new private pin
   async function onSubmitPin() {
     if (!newPinText.trim() || !newPinCoords) { Alert.alert("Please enter a note."); return; }
     try {
@@ -337,11 +376,21 @@ export default function MapScreen({ route, navigation }: any) {
         text: newPinText.trim(),
         location: new GeoPoint(newPinCoords.lat, newPinCoords.lng),
         createdAt: serverTimestamp(),
+        listIds: selectedListIds, // <-- ADD THE SELECTED LIST IDs
       });
       setPinCreateModalOpen(false);
       setNewPinText('');
+      setSelectedListIds([]); // <-- RESET after submission
     } catch (err: any) { console.error("Failed to create pin:", err); Alert.alert("Error", "Could not save pin."); }
   }
+  
+  const handleListSelection = (listId: string) => {
+    if (selectedListIds.includes(listId)) {
+        setSelectedListIds(selectedListIds.filter(id => id !== listId));
+    } else {
+        setSelectedListIds([...selectedListIds, listId]);
+    }
+  };
 
   function onWebMessage(evt: any) {
     try {
@@ -595,11 +644,36 @@ export default function MapScreen({ route, navigation }: any) {
       <Modal visible={pinCreateModalOpen} transparent animationType="fade">
         <View style={styles.backdrop}>
           <View style={styles.modalCard}>
-            <TouchableOpacity onPress={() => { setPinCreateModalOpen(false); setNewPinText(''); }} style={styles.closeButton}><MaterialCommunityIcons name="close" size={24} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => { setPinCreateModalOpen(false); setNewPinText(''); setSelectedListIds([]); }} style={styles.closeButton}><MaterialCommunityIcons name="close" size={24} /></TouchableOpacity>
             <Text style={styles.modalTitle}>New Personal Pin</Text>
             <TextInput style={styles.messageInput} placeholder="Note, reminder, memory..." value={newPinText} onChangeText={setNewPinText} multiline />
+            
+            {/* NEW: List Selection UI */}
+            <Text style={styles.listSelectionTitle}>Add to lists (optional)</Text>
+            <View style={styles.listSelectionContainer}>
+              {userPinLists.length > 0 ? (
+                <FlatList
+                    data={userPinLists}
+                    keyExtractor={item => item.id}
+                    renderItem={({item}) => {
+                        const isSelected = selectedListIds.includes(item.id);
+                        return (
+                            <TouchableOpacity
+                                style={[styles.listSelectItem, isSelected && styles.listSelectItemActive]}
+                                onPress={() => handleListSelection(item.id)}
+                            >
+                                <Text style={[styles.listSelectItemText, isSelected && styles.listSelectItemTextActive]}>{item.name}</Text>
+                            </TouchableOpacity>
+                        )
+                    }}
+                />
+              ) : (
+                <Text style={styles.noListsText}>No lists created yet. Go to your profile to create one!</Text>
+              )}
+            </View>
+            
             <View style={styles.actionsRow}>
-              <TouchableOpacity style={styles.actionButton} onPress={() => { setPinCreateModalOpen(false); setNewPinText(''); }}><Text style={styles.actionLabel}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.actionButton} onPress={() => { setPinCreateModalOpen(false); setNewPinText(''); setSelectedListIds([]); }}><Text style={styles.actionLabel}>Cancel</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.actionButton, styles.shoutButton]} onPress={onSubmitPin}><Text style={[styles.actionLabel, { color: '#fff' }]}>Save Pin</Text></TouchableOpacity>
             </View>
           </View>
@@ -686,4 +760,38 @@ const styles = StyleSheet.create({
   layerToggleSeparator: { width: '80%', height: 1, backgroundColor: '#EEE', alignSelf: 'center', },
   choiceButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginBottom: 8, },
   choiceButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  listSelectionTitle: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#666',
+      marginBottom: 8,
+    },
+    listSelectionContainer: {
+      maxHeight: 120, // Limit height to prevent modal from becoming too tall
+      borderWidth: 1,
+      borderColor: '#EEE',
+      borderRadius: 8,
+      marginBottom: 16,
+    },
+    listSelectItem: {
+      padding: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: '#EEE',
+    },
+    listSelectItemActive: {
+      backgroundColor: '#E0EFFF',
+    },
+    listSelectItemText: {
+      color: '#333',
+    },
+    listSelectItemTextActive: {
+      fontWeight: 'bold',
+      color: '#1976FF',
+    },
+    noListsText: {
+      padding: 12,
+      textAlign: 'center',
+      color: '#999',
+      fontStyle: 'italic',
+    }
 });
