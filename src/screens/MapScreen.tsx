@@ -623,7 +623,10 @@ export default function MapScreen({ route, navigation }: any) {
         <TouchableOpacity style={styles.searchButton} onPress={onSearch}><Text style={styles.searchButtonText}>GO</Text></TouchableOpacity>
       </View>
       
-      <TouchableOpacity style={[styles.locateButton, { bottom: insets.bottom + 90 }]} onPress={locateMe}>
+      <TouchableOpacity 
+        style={[styles.locateButton, { top: verticalCenterOffset + toggleContainerHeight + 16 }]} 
+        onPress={locateMe}
+      >
         <MaterialIcons name="my-location" size={24} color="#333" />
       </TouchableOpacity>
 
@@ -762,6 +765,10 @@ export default function MapScreen({ route, navigation }: any) {
       <Modal visible={promoteChoiceModalOpen} transparent animationType="fade">
         <View style={styles.backdrop}>
           <View style={styles.modalCard}>
+            {/* ADDED: Close button */}
+            <TouchableOpacity onPress={() => setPromoteChoiceModalOpen(false)} style={styles.closeButton}>
+              <MaterialCommunityIcons name="close" size={24} color="#333" />
+            </TouchableOpacity>
             <Text style={styles.modalTitle}>How to Share?</Text>
             <Text style={styles.message}>Share as a temporary Shout that expires, or a lasting Spot that gets renewed by community likes?</Text>
             <TouchableOpacity style={[styles.choiceButton, {backgroundColor: '#007AFF'}]} onPress={() => handlePromoteChoice('shout')}>
@@ -770,9 +777,7 @@ export default function MapScreen({ route, navigation }: any) {
             <TouchableOpacity style={[styles.choiceButton, {backgroundColor: '#FFD600'}]} onPress={() => handlePromoteChoice('spot')}>
               <Text style={[styles.choiceButtonText, {color: '#000'}]}>Spot (Lasting)</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionButton, {marginTop: 12}]} onPress={() => setPromoteChoiceModalOpen(false)}>
-              <Text style={styles.actionLabel}>Cancel</Text>
-            </TouchableOpacity>
+            
           </View>
         </View>
       </Modal>
@@ -786,10 +791,10 @@ const styles = StyleSheet.create({
   webview: { flex: 1, zIndex: -1 },
   backdrop: { ...StyleSheet.absoluteFillObject, flex: 1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', },
   modalCard: { width: '90%', backgroundColor:'#FFF', borderRadius: 12, padding: 20, position: 'relative', },
-  closeButton: { position: 'absolute', top: 12, right: 12, zIndex: 1, },
+  closeButton: { position: 'absolute', top: 12, right: 12, zIndex: 1, padding: 4,},
   header: { flexDirection: 'row', alignItems:  'center', marginBottom: 12, justifyContent: 'center' },
-  modalTitle: { fontSize: 20, fontWeight: '600', marginBottom: 16, textAlign: 'center', },
-  message: { fontSize: 16, marginBottom: 12, color: '#333', textAlign: 'center', lineHeight: 22 },
+  modalTitle: { fontSize: 20, fontWeight: '600', marginBottom: 16, textAlign: 'center', paddingTop: 24,},
+  message: { fontSize: 16, marginBottom: 24, color: '#333', textAlign: 'center', lineHeight: 22 },
   expiresText: { fontSize: 14, color: '#5B3EFC', marginBottom: 20, textAlign: 'center' },
   actionsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, },
   actionButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: '#EEE', borderRadius: 8, marginHorizontal: 4, },
@@ -817,8 +822,8 @@ const styles = StyleSheet.create({
   layerToggleButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', },
   layerToggleButtonActive: { backgroundColor: '#007AFF', },
   layerToggleSeparator: { width: '80%', height: 1, backgroundColor: '#EEE', alignSelf: 'center', },
-  choiceButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginBottom: 8, },
-  choiceButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  choiceButton: { paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginBottom: 8, width: '100%',},
+  choiceButtonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   listSelectionTitle: {
       fontSize: 14,
       fontWeight: '600',
@@ -858,12 +863,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    height: 50,
+    height: 40,
     zIndex: 10,
   },
   filterPill: {
     backgroundColor: '#FFFFFF',
-    paddingVertical: 8,
+    paddingVertical: 6,
     paddingHorizontal: 16,
     borderRadius: 20,
     marginHorizontal: 4,

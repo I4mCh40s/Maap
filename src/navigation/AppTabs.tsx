@@ -165,7 +165,7 @@ const styles = StyleSheet.create({
   },
   plusButton: {
     position: 'absolute',
-    top: -24,
+    top: -12,
     width: 64,
     height: 64,
     borderRadius: 32,
