@@ -11,7 +11,7 @@ import { auth, db } from '../firebase';
 import {
   collection, query, where, onSnapshot, orderBy,
   doc, deleteDoc, Timestamp, addDoc, serverTimestamp,
-  updateDoc
+  updateDoc, getDocs
 } from 'firebase/firestore';
 
 type PublicItem = { id: string; text: string; createdAt: Timestamp | null; expiresAt: Timestamp; likeCount: number; type: 'shout' | 'spot'; };
@@ -45,6 +45,9 @@ export default function ProfileScreen({ navigation }: any) {
   // NEW STATE FOR EDIT MODAL
   const [isEditModalVisible, setEditModalVisible] = useState(false);
   const [listNameToEdit, setListNameToEdit] = useState('');
+
+  // NEW: State for the refresh control
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // --- DATA FETCHING HOOKS ---
 
@@ -126,6 +129,27 @@ export default function ProfileScreen({ navigation }: any) {
 
   // --- HANDLER FUNCTIONS ---
 
+  // NEW: Handler for the pull-to-refresh action
+  const onRefresh = async () => {
+    if (!uid) return;
+    setIsRefreshing(true);
+    try {
+      // Manually re-fetch the shouts using getDocs for a one-time read
+      const q = query(collection(db, 'public_items'), where('ownerId', '==', uid), orderBy('createdAt', 'desc'));
+      const querySnapshot = await getDocs(q);
+      const items = querySnapshot.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, text: data.text as string, createdAt: data.createdAt as Timestamp, expiresAt: data.expiresAt as Timestamp, likeCount: data.likeCount as number, type: data.type as 'shout' | 'spot' };
+      });
+      setPublicItems(items);
+    } catch (error) {
+      console.error("Failed to refresh shouts:", error);
+      Alert.alert("Refresh failed", "Could not fetch latest shouts.");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const handleFlyToPin = (pin: PinItem) => {
     navigation.navigate('Home', { screen: 'Map', params: { flyToCoords: { lat: pin.lat, lng: pin.lng } } });
   };
@@ -191,7 +215,6 @@ export default function ProfileScreen({ navigation }: any) {
   
   const renderPublicItem = ({ item }: { item: PublicItem }) => {
     const minutesLeft = item.expiresAt ? Math.max(0, Math.ceil((item.expiresAt.toMillis() - Date.now()) / 60000)) : 0;
-    // Add the required 'return' statement
     return (
       <View style={styles.card}>
         <Text style={styles.cardText}>{item.text}</Text>
@@ -209,7 +232,6 @@ export default function ProfileScreen({ navigation }: any) {
     );
   };
   const renderPinItem = ({ item }: { item: PinItem }) => {
-    // Add the required 'return' statement
     return (
       <TouchableOpacity style={styles.pinCard} onPress={() => handleFlyToPin(item)}>
         <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -228,7 +250,7 @@ export default function ProfileScreen({ navigation }: any) {
   const renderPinListItem = ({ item }: { item: PinList }) => (
     <TouchableOpacity style={styles.listItem} onPress={() => setSelectedList(item)}>
         <View style={styles.listItemIconContainer}>
-            <MaterialCommunityIcons name="map-marker-outline" size={24} color="#555" />
+            <MaterialCommunityIcons name="map-marker" size={24} color="#555" />
         </View>
         <View style={styles.listItemTextContainer}>
             <Text style={styles.listItemTitle}>{item.name}</Text>
@@ -238,24 +260,18 @@ export default function ProfileScreen({ navigation }: any) {
     </TouchableOpacity>
   );
 
-  const TAB_BAR_OFFSET = 80;
   const PinListsView = () => (
     <FlatList
         data={combinedPinLists}
         renderItem={renderPinListItem}
         keyExtractor={item => item.id}
         contentContainerStyle={styles.listContainer}
-        ListFooterComponent={(
-            <TouchableOpacity style={styles.createListButton} onPress={() => setCreateListModalVisible(true)}>
-                <Text style={styles.createListButtonText}>+ Create a new list</Text>
-            </TouchableOpacity>
-        )}
     />
   );
 
   
   return (
-    <SafeAreaView style={[styles.safe, { paddingBottom: selectedList ? 0 : TAB_BAR_OFFSET }]}>
+    <SafeAreaView style={styles.safe}>
       {selectedList ? (
         // --- RENDER LIST DETAIL VIEW ---
         <>
@@ -283,19 +299,23 @@ export default function ProfileScreen({ navigation }: any) {
       ) : (
         // --- RENDER MAIN PROFILE VIEW ---
         <>
-          <View style={[styles.headerContainer, { paddingTop: insets.top + 12 }]}>
-            <Text style={styles.title}>Your Profile</Text>
+          <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
+            <View style={styles.titleRow}>
+              <Text style={styles.title}>Your Profile</Text>
+              <TouchableOpacity onPress={handleLogout} style={styles.logoutIcon}>
+                <MaterialCommunityIcons name="logout" size={26} color="#333" />
+              </TouchableOpacity>
+            </View>
             <View style={styles.headerRow}>
-              {profile.photoURL ? (<Image source={{ uri: profile.photoURL }} style={styles.avatar} />) : (<View style={styles.avatarPlaceholder}><Text style={styles.avatarText}>{(user?.displayName ?? '?').charAt(0)}</Text></View>)}
-              <View style={{ marginLeft: 12 }}>
+              {profile.photoURL ? (<Image source={{ uri: profile.photoURL }} style={styles.avatar} />) : (<View style={styles.avatarPlaceholder}><Text style={styles.avatarText}>{(user?.displayName ?? 'M').charAt(0)}</Text></View>)}
+              <View style={{ marginLeft: 12, flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={styles.displayName}>{user?.displayName ?? '—'}</Text>
+                  <Text style={styles.displayName}>{user?.displayName ?? 'Maap'}</Text>
                   {profile.isMerchant ? (<MaterialCommunityIcons name="storefront" size={18} color="#FF7043" style={styles.badgeIcon} />) : profile.isVerified ? (<MaterialCommunityIcons name="check-decagram" size={18} color="#3BAEFC" style={styles.badgeIcon} />) : null}
                 </View>
-                <Text style={styles.email}>{user?.email}</Text>
+                <Text style={styles.email} numberOfLines={1}>{user?.email ?? 'vlasweb@yandex.ru'}</Text>
               </View>
             </View>
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}><Text style={styles.logoutText}>Log Out</Text></TouchableOpacity>
             <View style={styles.segmentedControlContainer}>
               <TouchableOpacity style={[styles.segmentButton, activeTab === 'pins' && styles.segmentButtonActive]} onPress={() => setActiveTab('pins')}>
                 <Text style={[styles.segmentButtonText, activeTab === 'pins' && styles.segmentButtonTextActive]}>My Pins</Text>
@@ -309,11 +329,28 @@ export default function ProfileScreen({ navigation }: any) {
           {loading ? (<ActivityIndicator size="large" style={{ marginTop: 40 }} />) : (
             <View style={{ flex: 1 }}>
               {activeTab === 'pins' ? <PinListsView /> : (
-                <FlatList data={publicItems} renderItem={renderPublicItem} keyExtractor={item => item.id} contentContainerStyle={styles.listContainer} ListEmptyComponent={<Text style={styles.noShouts}>You haven’t posted any public items.</Text>} />
+                <FlatList 
+                  data={publicItems} 
+                  renderItem={renderPublicItem} 
+                  keyExtractor={item => item.id} 
+                  contentContainerStyle={styles.listContainer} 
+                  ListEmptyComponent={<Text style={styles.noShouts}>You haven’t posted any public items.</Text>}
+                  onRefresh={onRefresh}
+                  refreshing={isRefreshing}
+                />
               )}
             </View>
           )}
         </>
+      )}
+
+      {activeTab === 'pins' && !selectedList && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => setCreateListModalVisible(true)}
+        >
+          <MaterialCommunityIcons name="plus" size={28} color="white" />
+        </TouchableOpacity>
       )}
 
       <Modal visible={isCreateListModalVisible} transparent animationType="fade">
@@ -343,7 +380,6 @@ export default function ProfileScreen({ navigation }: any) {
                       value={listNameToEdit}
                       onChangeText={setListNameToEdit}
                   />
-                  {/* Action Row for Save/Cancel */}
                   <View style={styles.actionsRow}>
                     <TouchableOpacity style={styles.actionButton} onPress={() => setEditModalVisible(false)}>
                       <Text>Cancel</Text>
@@ -352,8 +388,6 @@ export default function ProfileScreen({ navigation }: any) {
                       <Text style={styles.confirmButtonText}>Save</Text>
                     </TouchableOpacity>
                   </View>
-                  
-                  {/* Destructive action button, correctly styled and positioned */}
                   <TouchableOpacity 
                     style={styles.deleteListButton} 
                     onPress={confirmDelete}
@@ -363,25 +397,34 @@ export default function ProfileScreen({ navigation }: any) {
               </View>
           </View>
       </Modal>
-      {/* *** BUG FIX ENDS HERE *** */}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#FFF' },
-  headerContainer: { paddingHorizontal: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#EAEAEA' },
-  listContainer: { paddingHorizontal: 16, paddingTop: 16 },
-  title: { fontSize: 28, fontWeight: '700', marginBottom: 24, textAlign: 'center', color: '#333' },
-  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
-  avatar: { width: 48, height: 48, borderRadius: 24 },
-  avatarPlaceholder: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#EEE', alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 20, color: '#555' },
-  displayName: { fontSize: 18, fontWeight: '600', color: '#222' },
-  badgeIcon: { marginLeft: 6 },
-  email: { fontSize: 14, color: '#666' },
-  logoutButton: { marginBottom: 16, backgroundColor: '#E53935', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  logoutText: { color: '#FFF', fontSize: 16, fontWeight: '600' },
+  headerContainer: { paddingHorizontal: 16, backgroundColor: '#FFF', paddingBottom: 8 },
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 12,
+    position: 'relative',
+  },
+  title: { fontSize: 22, fontWeight: '700', color: '#333' },
+  logoutIcon: {
+    position: 'absolute',
+    right: 0,
+    padding: 4,
+  },
+  listContainer: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 120 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 24 },
+  avatar: { width: 64, height: 64, borderRadius: 32 },
+  avatarPlaceholder: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontSize: 28, color: '#555', fontWeight: '500' },
+  displayName: { fontSize: 20, fontWeight: 'bold', color: '#222' },
+  badgeIcon: { marginLeft: 8 },
+  email: { fontSize: 16, color: '#666', marginTop: 2 },
   noShouts: { fontSize: 16, color: '#777', textAlign: 'center', marginTop: 40 },
   card: { backgroundColor: '#F8F8F8', borderRadius: 8, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#EAEAEA' },
   pinCard: { backgroundColor: '#FFF', borderRadius: 12, paddingVertical: 8, paddingHorizontal: 16, marginBottom: 8, borderWidth: 1, borderColor: '#F0F0F0' },
@@ -392,18 +435,16 @@ const styles = StyleSheet.create({
   cardLikes: { fontSize: 14, color: '#E53935', fontWeight: '500' },
   cardExpiry: { color: '#E53935', fontSize: 12, fontStyle: 'italic' },
   deleteButton: { padding: 4 },
-  segmentedControlContainer: { flexDirection: 'row', backgroundColor: '#EAEAEA', borderRadius: 8, marginVertical: 8, },
-  segmentButton: { flex: 1, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', },
-  segmentButtonActive: { backgroundColor: '#FFF', borderRadius: 8, shadowColor: '#000', shadowOpacity: 0.1, shadowOffset: { width: 0, height: 1 }, shadowRadius: 2, elevation: 3, zIndex: 1, },
+  segmentedControlContainer: { flexDirection: 'row', backgroundColor: '#F0F0F0', borderRadius: 10, padding: 2, },
+  segmentButton: { flex: 1, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 8, },
+  segmentButtonActive: { backgroundColor: '#007AFF' },
   segmentButtonText: { fontWeight: '600', fontSize: 14, color: '#666', },
-  segmentButtonTextActive: { color: '#1976FF', },
-  listItem: { backgroundColor: '#FFF', flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 12, marginBottom: 8, borderWidth: 1, borderColor: '#F0F0F0' },
-  listItemIconContainer: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center', marginRight: 16, },
-  listItemTextContainer: { flex: 1 },
-  listItemTitle: { fontSize: 16, fontWeight: '600', color: '#333' },
+  segmentButtonTextActive: { color: '#FFF', },
+  listItem: { backgroundColor: '#FFF', flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 4, },
+  listItemIconContainer: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginRight: 12, },
+  listItemTextContainer: { flex: 1, borderBottomWidth: 1, borderBottomColor: '#F0F0F0', paddingBottom: 16, paddingTop: 4 },
+  listItemTitle: { fontSize: 16, fontWeight: '500', color: '#333' },
   listItemSubtitle: { fontSize: 14, color: '#888', marginTop: 2 },
-  createListButton: { backgroundColor: '#E53935', borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 8, marginBottom: 16 },
-  createListButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
   detailHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#EAEAEA', backgroundColor: '#FFF', },
   detailTitle: { flex: 1, textAlign: 'center', fontSize: 18, fontWeight: 'bold', color: '#333', },
   backButton: { padding: 8 },
@@ -417,16 +458,22 @@ const styles = StyleSheet.create({
   actionButton: { flex: 1,  padding: 12, alignItems: 'center', borderRadius: 8, backgroundColor: '#EEE', },
   confirmButton: { backgroundColor: '#1976FF' },
   confirmButtonText: { color: '#FFF', fontWeight: 'bold' },
-  deleteListButton: {
-    // This style is for a standalone button, not one in an actionsRow
-    marginTop: 12, // Add space above it
-    backgroundColor: '#E53935', 
-    padding: 12,
+  deleteListButton: { marginTop: 12, backgroundColor: '#E53935', padding: 12, alignItems: 'center', borderRadius: 8, },
+  deleteListButtonText: { color: '#FFF', fontWeight: 'bold' },
+  fab: {
+    position: 'absolute',
+    width: 56,
+    height: 56,
     alignItems: 'center',
-    borderRadius: 8,
-  },
-  deleteListButtonText: { 
-    color: '#FFF', 
-    fontWeight: 'bold' 
+    justifyContent: 'center',
+    right: 24,
+    bottom: 96,
+    backgroundColor: '#E53935',
+    borderRadius: 28,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowRadius: 5,
+    shadowOpacity: 0.3,
+    shadowOffset: { height: 2, width: 0 },
   },
 });

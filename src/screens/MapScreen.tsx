@@ -263,37 +263,53 @@ export default function MapScreen({ route, navigation }: any) {
     return () => sub?.remove();
   }, []);
 
+  // PART 1: A simple listener to get all currently active public items.
   useEffect(() => {
+    // This query is efficient because it only asks for items that haven't expired yet.
     const q = query(collection(db, 'public_items'), where('expiresAt', '>', Timestamp.now()));
-    const unsub = onSnapshot(q, 
-      (snap) => {
-        const items: PublicItem[] = snap.docs.map(d => {
-          const data = d.data();
-          return {
-            id: d.id,
-            type: data.type,
-            text: data.text,
-            lat: data.location.latitude,
-            lng: data.location.longitude,
-            authorName: data.authorName,
-            ownerId: data.ownerId,
-            createdAt: (data.createdAt as Timestamp)?.toMillis() ?? Date.now(),
-            expiresAt: data.expiresAt,
-            likeCount: data.likeCount || 0,
-            likedBy: data.likedBy || [],
-            radius: data.radius || 500,
-            authorIsVerified: data.authorIsVerified ?? false,
-            authorIsMerchant: data.authorIsMerchant ?? false,
-          };
-        });
-        setPublicItems(items);
-      },
-      (error) => {
-        console.error("Firestore Error: Failed to fetch public items. Ensure your `public_items` collection has an index on `expiresAt`.", error);
-      }
-    );
+    
+    const unsub = onSnapshot(q, (snap) => {
+      const items: PublicItem[] = snap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id, type: data.type, text: data.text,
+          lat: data.location.latitude, lng: data.location.longitude,
+          authorName: data.authorName, ownerId: data.ownerId,
+          createdAt: (data.createdAt as Timestamp)?.toMillis() ?? Date.now(),
+          expiresAt: data.expiresAt, likeCount: data.likeCount || 0,
+          likedBy: data.likedBy || [], radius: data.radius || 500,
+          authorIsVerified: data.authorIsVerified ?? false,
+          authorIsMerchant: data.authorIsMerchant ?? false,
+        };
+      });
+      setPublicItems(items);
+    });
+
     return unsub;
   }, []);
+
+  // PART 2: An active timer that finds expired items in the state and deletes them from the database.
+  useEffect(() => {
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      // Find items in our current state that have now expired.
+      const expiredItems = publicItems.filter(item => item.expiresAt.toMillis() <= now);
+
+      if (expiredItems.length > 0) {
+        // If we find any, we trigger their deletion from Firestore.
+        // This will cause the onSnapshot listener above to run, automatically updating the UI.
+        console.log(`Deleting ${expiredItems.length} expired item(s) from Firestore.`);
+        expiredItems.forEach(item => {
+          const itemRef = doc(db, 'public_items', item.id);
+          deleteDoc(itemRef).catch(err => {
+            console.error(`Failed to delete expired item ${item.id}:`, err);
+          });
+        });
+      }
+    }, 60000); // Check every minute.
+
+    return () => clearInterval(cleanupInterval); // Important: clear the interval on unmount.
+  }, [publicItems]); // This effect depends on the publicItems state.
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -567,10 +583,11 @@ export default function MapScreen({ route, navigation }: any) {
 
   const screenHeight = Dimensions.get('window').height;
   const toggleContainerHeight = 48 + 1 + 48; 
-  const verticalCenterOffset = (screenHeight / 2) - (toggleContainerHeight / 2);
+  const verticalCenterOffset = (screenHeight / 2) - (toggleContainerHeight / 2) - 60; // Adjust position up
 
   return (
-    <SafeAreaView style={{ flex: 1 }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+      <StatusBar barStyle="dark-content" />
       {mapCenter && (
         Platform.OS === 'web' ? (
           <WebMapView html={mapHtml} onMessage={onWebMessage} jsToInject={jsToInject} />
@@ -579,18 +596,12 @@ export default function MapScreen({ route, navigation }: any) {
         )
       )}
       
-      {mapMode === 'public' && <TopShoutsPanel shouts={visiblePublicItems} top={insets.top + 50} onSelectShout={(item) => {
-        const js = `map.flyTo({ center: [${item.lng}, ${item.lat}], zoom: 17 });`;
-        if (Platform.OS === 'web') { setJsToInject({ code: js, timestamp: Date.now() }); } 
-        else { wv.current?.injectJavaScript(`${js} true;`); }
-      }} />}
-      
       <View style={[styles.searchBar, { top: insets.top + 8 }]}>
         <TextInput style={styles.searchInput} placeholder="Search location" value={searchQuery} onChangeText={setSearchQuery} returnKeyType="search" onSubmitEditing={onSearch} />
         <TouchableOpacity style={styles.searchButton} onPress={onSearch}><Text style={styles.searchButtonText}>GO</Text></TouchableOpacity>
       </View>
       
-      <TouchableOpacity style={[styles.locateButton, { bottom: insets.bottom + 80 }]} onPress={locateMe}>
+      <TouchableOpacity style={[styles.locateButton, { bottom: insets.bottom + 90 }]} onPress={locateMe}>
         <MaterialIcons name="my-location" size={24} color="#333" />
       </TouchableOpacity>
 
@@ -724,7 +735,7 @@ export default function MapScreen({ route, navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0, },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center', },
-  webview: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, zIndex: 0, },
+  webview: { flex: 1, zIndex: -1 },
   backdrop: { ...StyleSheet.absoluteFillObject, flex: 1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', },
   modalCard: { width: '90%', backgroundColor:'#FFF', borderRadius: 12, padding: 20, position: 'relative', },
   closeButton: { position: 'absolute', top: 12, right: 12, zIndex: 1, },
@@ -735,13 +746,13 @@ const styles = StyleSheet.create({
   actionsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, },
   actionButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: '#EEE', borderRadius: 8, marginHorizontal: 4, },
   actionLabel: { marginLeft: 6, fontSize: 16, fontWeight: '500', color: '#333', },
-  searchBar: { position: 'absolute', top: Platform.OS === 'android' ? StatusBar.currentHeight! + 8 : 44, left: 16, right: 16, height: 40, flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 8, overflow: 'hidden', elevation: 3, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, zIndex: 10, },
-  searchInput: { flex: 1, paddingHorizontal: 12, fontSize: 16, backgroundColor: 'transparent', },
-  searchButton: { width: 50, alignItems: 'center', justifyContent: 'center', backgroundColor: '#007AFF', },
+  searchBar: { position: 'absolute', left: 16, right: 16, height: 44, flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 22, overflow: 'hidden', elevation: 3, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, zIndex: 10, },
+  searchInput: { flex: 1, paddingHorizontal: 16, fontSize: 16, backgroundColor: 'transparent', },
+  searchButton: { width: 60, alignItems: 'center', justifyContent: 'center', backgroundColor: '#007AFF', },
   searchButtonText: { color: '#FFF', fontWeight: '600', fontSize: 16, },
   messageInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, padding: 12, minHeight: 80, textAlignVertical: 'top', marginBottom: 16, },
   shoutButton: { backgroundColor: '#1976FF', },
-  locateButton: { position: 'absolute', right: 16, width: 48, height: 48, borderRadius: 24, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', elevation: 3, shadowColor: '#000', shadowOpacity: 0.2, shadowOffset: { width: 0, height: 2 }, shadowRadius: 3, zIndex: 10, bottom: 80 },
+  locateButton: { position: 'absolute', right: 16, width: 48, height: 48, borderRadius: 24, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.2, shadowOffset: { width: 0, height: 2 }, shadowRadius: 3, zIndex: 10, },
   layerToggleContainer: { 
     position: 'absolute', 
     right: 16, 
@@ -756,7 +767,7 @@ const styles = StyleSheet.create({
     flexDirection: 'column', 
   },
   layerToggleButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', },
-  layerToggleButtonActive: { backgroundColor: '#5B3EFC', },
+  layerToggleButtonActive: { backgroundColor: '#007AFF', },
   layerToggleSeparator: { width: '80%', height: 1, backgroundColor: '#EEE', alignSelf: 'center', },
   choiceButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginBottom: 8, },
   choiceButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
