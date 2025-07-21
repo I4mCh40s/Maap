@@ -81,6 +81,7 @@ type Pin = {
   lng: number;
   ownerId: string;
   createdAt: number;
+  listIds?: string[];
 };
 
 type PinList = { id: string; name: string; }; // Simple type for lists
@@ -88,36 +89,32 @@ type PinList = { id: string; name: string; }; // Simple type for lists
 let lastKnownUserCoords: { lat: number, lng: number } | null = null;
 
 export default function MapScreen({ route, navigation }: any) {
+  // --- ALL HOOKS MUST BE CALLED HERE, AT THE TOP ---
   const insets = useSafeAreaInsets();
-  const GOAL_LIKES = 10;
-
   const wv = useRef<WebView>(null);
+
+  // State Hooks
   const [ready, setReady] = useState(false);
   const [userCoords, setUserCoords] = useState<{lat:number,lng:number}|null>(null);
   const [mapCenter, setMapCenter] = useState<{lat:number,lng:number}|null>(null);
-  
   const [mapMode, setMapMode] = useState<'pins' | 'public'>('pins');
   const [publicItems, setPublicItems] = useState<PublicItem[]>([]);
   const [personalPins, setPersonalPins] = useState<Pin[]>([]);
-
   const [createPublicItemModalOpen, setCreatePublicItemModalOpen] = useState(false);
   const [newPublicItemText, setNewPublicItemText] = useState('');
   const [newPublicItemType, setNewPublicItemType] = useState<'shout' | 'spot'>('shout');
-
   const [pinCreateModalOpen, setPinCreateModalOpen] = useState(false);
   const [newPinText, setNewPinText] = useState('');
   const [newPinCoords, setNewPinCoords] = useState<{lat: number, lng: number} | null>(null);
-
   const [userPinLists, setUserPinLists] = useState<PinList[]>([]);
   const [selectedListIds, setSelectedListIds] = useState<string[]>([]);
-  
   const [detailPin, setDetailPin] = useState<Pin | null>(null);
   const [promoteChoiceModalOpen, setPromoteChoiceModalOpen] = useState(false);
   const [promotionCoords, setPromotionCoords] = useState<{lat: number, lng: number} | null>(null);
   const [detailItem, setDetailItem] = useState<PublicItem|null>(null);
-
   const [searchQuery, setSearchQuery] = useState('');
   const [jsToInject, setJsToInject] = useState<{ code: string; timestamp: number } | undefined>();
+  const [activePinListFilter, setActivePinListFilter] = useState<string>('all');
   
   const visiblePublicItems = useMemo(() => {
       if (!userCoords) return [];
@@ -126,6 +123,20 @@ export default function MapScreen({ route, navigation }: any) {
         return distance <= s.radius;
       });
     }, [publicItems, userCoords]);
+
+  // NEW: Memoized array of pins to display based on the active filter
+  const filteredPersonalPins = useMemo(() => {
+    if (activePinListFilter === 'all') {
+      return personalPins;
+    }
+    return personalPins.filter(pin => pin.listIds?.includes(activePinListFilter));
+  }, [personalPins, activePinListFilter]);
+
+  
+
+  // NEW: Data for the filter pills, including the "All" option
+  const filterPills = useMemo(() => [{ id: 'all', name: 'All pins' }, ...userPinLists], [userPinLists]);
+
 
   useEffect(() => {
     const handleCreateModalOpen = async () => {
@@ -319,7 +330,16 @@ export default function MapScreen({ route, navigation }: any) {
       (snap) => {
         const pins: Pin[] = snap.docs.map(d => {
           const data = d.data();
-          return { id: d.id, text: data.text, lat: data.location.latitude, lng: data.location.longitude, ownerId: data.ownerId, createdAt: (data.createdAt as Timestamp)?.toMillis() ?? Date.now() };
+          return { 
+            id: d.id, 
+            text: data.text, 
+            lat: data.location.latitude, 
+            lng: data.location.longitude, 
+            ownerId: data.ownerId, 
+            createdAt: (data.createdAt as Timestamp)?.toMillis() ?? Date.now(),
+            // This line was missing. It's now added.
+            listIds: data.listIds || [] 
+          };
         });
         setPersonalPins(pins);
       },
@@ -330,19 +350,20 @@ export default function MapScreen({ route, navigation }: any) {
     return unsub;
   }, []);
 
+  
   useEffect(() => {
     if (!ready) return;
     let itemsToRender: any[] = [];
     if (mapMode === 'public') {
       itemsToRender = visiblePublicItems.map(item => ({ ...item, renderType: item.type }));
     } else {
-      itemsToRender = personalPins.map(pin => ({ ...pin, renderType: 'pin' }));
+      itemsToRender = filteredPersonalPins.map(pin => ({ ...pin, renderType: 'pin' }));
     }
     const markerArray = JSON.stringify(itemsToRender);
     const js = `addMarkers(${markerArray});`;
     if (Platform.OS === 'web') { setJsToInject({ code: js, timestamp: Date.now() }); } 
     else { wv.current?.injectJavaScript(`${js} true;`); }
-  }, [ready, visiblePublicItems, personalPins, mapMode]);
+  }, [ready, visiblePublicItems, filteredPersonalPins, mapMode]);
 
   async function onSubmitPublicItem() {
     try {
@@ -584,6 +605,7 @@ export default function MapScreen({ route, navigation }: any) {
   const screenHeight = Dimensions.get('window').height;
   const toggleContainerHeight = 48 + 1 + 48; 
   const verticalCenterOffset = (screenHeight / 2) - (toggleContainerHeight / 2) - 60; // Adjust position up
+  
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
@@ -614,6 +636,32 @@ export default function MapScreen({ route, navigation }: any) {
           <MaterialCommunityIcons name="map-marker" size={24} color={mapMode === 'pins' ? '#FFF' : '#333'} />
         </TouchableOpacity>
       </View>
+
+      {/* NEW: Filter Pills UI */}
+      {mapMode === 'pins' && (
+        <View style={[styles.filterContainer, { bottom: (insets.bottom || 8) + 80 }]}>
+          <FlatList
+            data={filterPills}
+            keyExtractor={item => item.id}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: 16 }}
+            renderItem={({ item }) => {
+              const isActive = activePinListFilter === item.id;
+              return (
+                <TouchableOpacity
+                  style={[styles.filterPill, isActive && styles.filterPillActive]}
+                  onPress={() => setActivePinListFilter(item.id)}
+                >
+                  <Text style={[styles.filterPillText, isActive && styles.filterPillTextActive]}>
+                    {item.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            }}
+          />
+        </View>
+      )}
 
       <Modal visible={!!detailItem} transparent animationType="fade">
         <View style={styles.backdrop}>
@@ -804,5 +852,38 @@ const styles = StyleSheet.create({
       textAlign: 'center',
       color: '#999',
       fontStyle: 'italic',
-    }
+    },
+    // NEW STYLES for the filter pills
+  filterContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 50,
+    zIndex: 10,
+  },
+  filterPill: {
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginHorizontal: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  filterPillActive: {
+    backgroundColor: '#007AFF',
+  },
+  filterPillText: {
+    color: '#000',
+    fontWeight: '500',
+  },
+  filterPillTextActive: {
+    color: '#FFF',
+    fontWeight: 'bold',
+  },
 });
