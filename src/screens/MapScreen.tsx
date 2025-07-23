@@ -12,7 +12,8 @@ import {
   Platform,
   StatusBar,
   Dimensions,
-  FlatList
+  FlatList,
+  NativeModules,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -87,6 +88,22 @@ type Pin = {
 type PinList = { id: string; name: string; }; // Simple type for lists
 
 let lastKnownUserCoords: { lat: number, lng: number } | null = null;
+
+// =================================================================================================
+// --- NATIVE MODULE BRIDGE ---
+// =================================================================================================
+
+// Get a reference to your custom module
+const { MyARModule } = NativeModules;
+
+// Handler function to launch the native AR screen
+const launchAR = () => {
+  if (MyARModule) {
+    MyARModule.launchARActivity();
+  } else {
+    Alert.alert("Native Module Error", "The AR module is not available on this device.");
+  }
+};
 
 export default function MapScreen({ route, navigation }: any) {
   // --- ALL HOOKS MUST BE CALLED HERE, AT THE TOP ---
@@ -603,7 +620,7 @@ export default function MapScreen({ route, navigation }: any) {
   };
 
   const screenHeight = Dimensions.get('window').height;
-  const toggleContainerHeight = 48 + 1 + 48; 
+  const toggleContainerHeight = 48 + 1 + 48 + 1 + 48; // Three buttons, two separators
   const verticalCenterOffset = (screenHeight / 2) - (toggleContainerHeight / 2) - 60; // Adjust position up
   
 
@@ -638,7 +655,13 @@ export default function MapScreen({ route, navigation }: any) {
         <TouchableOpacity style={[styles.layerToggleButton, mapMode === 'pins' && styles.layerToggleButtonActive]} onPress={() => setMapMode('pins')}>
           <MaterialCommunityIcons name="map-marker" size={24} color={mapMode === 'pins' ? '#FFF' : '#333'} />
         </TouchableOpacity>
+        {/* --- ADDED --- New AR Button */}
+        <View style={styles.layerToggleSeparator} />
+        <TouchableOpacity style={styles.layerToggleButton} onPress={launchAR}>
+          <MaterialCommunityIcons name="camera-outline" size={24} color={'#333'} />
+        </TouchableOpacity>
       </View>
+
 
       {/* NEW: Filter Pills UI */}
       {mapMode === 'pins' && (
