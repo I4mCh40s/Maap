@@ -5,7 +5,9 @@
     "noImplicitAny": false,
     "skipLibCheck": true,
     "jsx": "react-native",      // tell TS how to handle JSX
-    "esModuleInterop": true     // allow default imports from CJS modules like react
+    "esModuleInterop": true,     // allow default imports from CJS modules like react
+    "resolveJsonModule": true
+    
   },
   "include": [
     "src",

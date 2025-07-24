@@ -1,3 +1,4 @@
+// Path: android/app/src/main/java/com/vitalyiam/Maap/ar/DisplayRotationHelper.kt
 package com.vitalyiam.Maap.ar
 
 import android.app.Activity
@@ -10,7 +11,9 @@ class DisplayRotationHelper(private val activity: Activity) : DisplayManager.Dis
     private var viewportChanged = false
     private var viewportWidth = 0
     private var viewportHeight = 0
-    private val display: Display = activity.getSystemService(WindowManager::class.java).defaultDisplay
+    
+    // THIS LINE IS NOW CORRECT
+    private val display: Display by lazy { activity.getSystemService(WindowManager::class.java).defaultDisplay }
 
     fun onResume() {
         activity.getSystemService(DisplayManager::class.java).registerDisplayListener(this, null)

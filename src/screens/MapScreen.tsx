@@ -96,14 +96,7 @@ let lastKnownUserCoords: { lat: number, lng: number } | null = null;
 // Get a reference to your custom module
 const { MyARModule } = NativeModules;
 
-// Handler function to launch the native AR screen
-const launchAR = () => {
-  if (MyARModule) {
-    MyARModule.launchARActivity();
-  } else {
-    Alert.alert("Native Module Error", "The AR module is not available on this device.");
-  }
-};
+
 
 export default function MapScreen({ route, navigation }: any) {
   // --- ALL HOOKS MUST BE CALLED HERE, AT THE TOP ---
@@ -153,6 +146,35 @@ export default function MapScreen({ route, navigation }: any) {
 
   // NEW: Data for the filter pills, including the "All" option
   const filterPills = useMemo(() => [{ id: 'all', name: 'All pins' }, ...userPinLists], [userPinLists]);
+
+  // Handler function to launch the native AR screen
+// MODIFIED: This function will now take an array of shouts to display
+const launchAR = () => {
+    if (Platform.OS !== 'android' || !MyARModule) {
+        Alert.alert("Unsupported", "AR features are only available on Android for now.");
+        return;
+    }
+
+    // Use the 'visiblePublicItems' state that you already have!
+    // This state already contains the shouts that are near the user.
+    if (visiblePublicItems.length === 0) {
+        Alert.alert("No Shouts Nearby", "There are no public shouts in your immediate vicinity. Try walking around or create one!");
+        return;
+    }
+
+    // Format the data for our native module (lat, lng instead of position)
+    const shoutsForAR = visiblePublicItems.map(item => ({
+        id: item.id,
+        text: item.text,
+        lat: item.lat,
+        lng: item.lng
+    }));
+
+    const shoutsJsonString = JSON.stringify(shoutsForAR);
+
+    // We use the same native method, as it just passes the string
+    MyARModule.launchARActivityWithShouts(shoutsJsonString);
+};
 
 
   useEffect(() => {

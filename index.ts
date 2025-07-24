@@ -1,8 +1,11 @@
-import { registerRootComponent } from 'expo';
+// Ensure this is at the very top of the file!
+import 'react-native-gesture-handler';
 
-import App from './App';
+import { AppRegistry } from 'react-native';
+import App from './App'; // Make sure this path is correct
 
-// registerRootComponent calls AppRegistry.registerComponent('main', () => App);
-// It also ensures that whether you load the app in Expo Go or in a native build,
-// the environment is set up appropriately
-registerRootComponent(App);
+// Use a direct require() statement for the JSON file, which works
+// better with the Metro bundler and TypeScript's new setting.
+const appConfig = require('./app.json');
+
+AppRegistry.registerComponent(appConfig.name, () => App);

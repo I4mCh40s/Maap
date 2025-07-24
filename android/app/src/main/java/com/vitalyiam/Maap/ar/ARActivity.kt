@@ -1,5 +1,4 @@
 // Path: android/app/src/main/java/com/vitalyiam/Maap/ar/ARActivity.kt
-
 package com.vitalyiam.Maap.ar
 
 import android.opengl.GLES20
@@ -18,24 +17,18 @@ import javax.microedition.khronos.opengles.GL10
 class ARActivity : AppCompatActivity(), GLSurfaceView.Renderer {
 
     private val TAG = "ARActivity"
-
     private var session: Session? = null
     private lateinit var surfaceView: GLSurfaceView
     private var userRequestedInstall = true
 
-    // Create an instance of our new renderer
     private val backgroundRenderer = BackgroundRenderer()
-    
-    // Helper to manage screen rotation
-    // CORRECTED CODE
     private val displayRotationHelper by lazy { DisplayRotationHelper(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_ar)
         surfaceView = findViewById(R.id.surfaceview)
-
-        // Set up the GLSurfaceView with this activity as the renderer
+        
         surfaceView.setPreserveEGLContextOnPause(true)
         surfaceView.setEGLContextClientVersion(2)
         surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0)
@@ -50,14 +43,14 @@ class ARActivity : AppCompatActivity(), GLSurfaceView.Renderer {
             CameraPermissionHelper.requestCameraPermission(this)
             return
         }
-
-        // --- Session creation logic remains the same ---
+        
         if (session == null) {
-            var exception: Exception? = null
-            var message: String? = null
+            var exception: Exception? = null; var message: String? = null
             try {
                 when (ArCoreApk.getInstance().requestInstall(this, userRequestedInstall)) {
-                    ArCoreApk.InstallStatus.INSTALLED -> session = Session(this)
+                    ArCoreApk.InstallStatus.INSTALLED -> {
+                        session = Session(this)
+                    }
                     ArCoreApk.InstallStatus.INSTALL_REQUESTED -> {
                         userRequestedInstall = false
                         return
@@ -65,9 +58,8 @@ class ARActivity : AppCompatActivity(), GLSurfaceView.Renderer {
                 }
             } catch (e: Exception) {
                 exception = e
-                message = "Error creating AR session: ${e.javaClass.simpleName}"
+                message = "An error occurred while creating AR session: ${e.javaClass.simpleName}"
             }
-
             if (message != null) {
                 Log.e(TAG, "ARCore session creation failed", exception)
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show()
@@ -75,8 +67,7 @@ class ARActivity : AppCompatActivity(), GLSurfaceView.Renderer {
                 return
             }
         }
-        // --- End of session creation ---
-
+        
         try {
             session?.resume()
         } catch (e: CameraNotAvailableException) {
@@ -97,8 +88,6 @@ class ARActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         }
     }
 
-    // --- Renderer methods we need to implement ---
-
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0.1f, 0.1f, 0.1f, 1.0f)
         backgroundRenderer.createOnGlThread()
@@ -117,36 +106,22 @@ class ARActivity : AppCompatActivity(), GLSurfaceView.Renderer {
                 it.setCameraTextureName(backgroundRenderer.textureId)
                 val frame = it.update()
                 backgroundRenderer.draw(frame)
-
-                // LOGIC FOR DRAWING AVATARS WILL GO HERE LATER
-                
             } catch (t: Throwable) {
                 Log.e(TAG, "Exception on DrawFrame", t)
             }
         }
     }
     
-    // --- onRequestPermissionsResult remains the same ---
     override fun onRequestPermissionsResult(
-    requestCode: Int,
-    permissions: Array<String>,
-    grantResults: IntArray
-) {
-    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-    
-    // We check if the camera permission was granted.
-    if (!CameraPermissionHelper.hasCameraPermission(this)) {
-        Toast.makeText(this, "Camera permission is needed to run this application", Toast.LENGTH_LONG)
-            .show()
-            
-        // This is an optional but good UX practice: if the user permanently denied
-        // the permission, we guide them to the app settings to re-enable it.
-        if (!CameraPermissionHelper.shouldShowRequestPermissionRationale(this)) {
-            CameraPermissionHelper.launchPermissionSettings(this)
+        requestCode: Int, permissions: Array<String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (!CameraPermissionHelper.hasCameraPermission(this)) {
+            Toast.makeText(this, "Camera permission is needed to run this application", Toast.LENGTH_LONG).show()
+            if (!CameraPermissionHelper.shouldShowRequestPermissionRationale(this)) {
+                CameraPermissionHelper.launchPermissionSettings(this)
+            }
+            finish()
         }
-        
-        // If permission is not granted, we close the AR activity.
-        finish()
     }
-}
 }

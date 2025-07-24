@@ -1,22 +1,18 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
-  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-  <uses-permission android:name="android.permission.INTERNET"/>
-  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-  <uses-permission android:name="android.permission.VIBRATE"/>
-  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-  <uses-permission android:name="android.permission.CAMERA" />
-  <uses-feature android:name="android.hardware.camera.ar" android:required="true" />
-  <queries>
-    <intent>
-      <action android:name="android.intent.action.VIEW"/>
-      <category android:name="android.intent.category.BROWSABLE"/>
-      <data android:scheme="https"/>
-    </intent>
-  </queries>
-  <application
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"> 
+    <!-- Added xmlns:tools -->
+
+    <!-- PERMISSIONS & FEATURES -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.ar" android:required="true" />
+
+    <!-- Your other existing permissions like INTERNET, LOCATION etc. should remain -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- ... any other permissions you have ... -->
+
+    <application
       android:name=".MainApplication"
       android:label="@string/app_name"
       android:icon="@mipmap/ic_launcher"
@@ -24,10 +20,18 @@
       android:allowBackup="true"
       android:theme="@style/AppTheme">
 
-      <!-- ADD ARCORE METADATA HERE -->
-      <meta-data android:name="com.google.ar.core" android:value="required" />
+      <!-- ARCORE METADATA with replace rule -->
+      <meta-data 
+          android:name="com.google.ar.core" 
+          android:value="required" 
+          tools:node="replace"/>
 
-      <!-- Your main activity is already here -->
+      <!-- GEOSPATIAL API KEY (Remember to paste your actual key) -->
+      <meta-data 
+          android:name="com.google.android.geo.API_KEY"
+          android:value="AIzaSyDli0z--QEWo8WEEPOdB4zsaTpQXw_FAJU" />
+
+      <!-- Your Main Activity -->
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"
@@ -41,7 +45,7 @@
         </intent-filter>
       </activity>
 
-      <!-- ADD YOUR AR ACTIVITY DECLARATION HERE -->
+      <!-- YOUR AR ACTIVITY -->
       <activity android:name=".ar.ARActivity" />
 
     </application>

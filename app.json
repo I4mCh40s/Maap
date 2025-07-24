@@ -1,6 +1,9 @@
 {
+  "name": "Maap",
+  "displayName": "Maap",
   "expo": {
     "name": "Maap",
+    "displayName": "Maap",
     "slug": "Maap",
     "version": "alpha1.0",
     "orientation": "portrait",
