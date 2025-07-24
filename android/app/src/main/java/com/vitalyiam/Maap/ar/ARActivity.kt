@@ -1,5 +1,3 @@
-// Path: android/app/src/main/java/com/vitalyiam/Maap/ar/ARActivity.kt
-
 package com.vitalyiam.Maap.ar
 
 import android.opengl.GLES20
@@ -10,9 +8,14 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.ar.core.*
 import com.google.ar.core.exceptions.CameraNotAvailableException
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import com.vitalyiam.Maap.R
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+
+data class Shout(val id: String, val text: String, val lat: Double, val lng: Double)
+data class ShoutAnchor(val anchor: Anchor, val shout: Shout)
 
 class ARActivity : AppCompatActivity(), GLSurfaceView.Renderer {
 
@@ -23,15 +26,28 @@ class ARActivity : AppCompatActivity(), GLSurfaceView.Renderer {
 
     private val backgroundRenderer = BackgroundRenderer()
     private val displayRotationHelper by lazy { DisplayRotationHelper(this) }
-    private val objectRenderer = ObjectRenderer()
+    private val textRenderer = TextRenderer()
 
-    private var anchor: Anchor? = null
+    private val shoutsToCreate = mutableListOf<Shout>()
+    private val placedShouts = mutableListOf<ShoutAnchor>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val shoutsJson = intent.getStringExtra("shouts")
+        if (shoutsJson != null) {
+            Log.d(TAG, "Received shouts from JS: $shoutsJson")
+            val type = object : TypeToken<List<Shout>>() {}.type
+            try {
+                val parsedShouts: List<Shout> = Gson().fromJson(shoutsJson, type)
+                synchronized(shoutsToCreate) {
+                    shoutsToCreate.addAll(parsedShouts)
+                }
+            } catch (e: Exception) { Log.e(TAG, "Failed to parse shouts JSON", e) }
+        }
+
         setContentView(R.layout.activity_ar)
         surfaceView = findViewById(R.id.surfaceview)
-
+        
         surfaceView.setPreserveEGLContextOnPause(true)
         surfaceView.setEGLContextClientVersion(2)
         surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0)
@@ -41,11 +57,7 @@ class ARActivity : AppCompatActivity(), GLSurfaceView.Renderer {
 
     override fun onResume() {
         super.onResume()
-
-        if (!CameraPermissionHelper.hasCameraPermission(this)) {
-            CameraPermissionHelper.requestCameraPermission(this)
-            return
-        }
+        if (!CameraPermissionHelper.hasCameraPermission(this)) { CameraPermissionHelper.requestCameraPermission(this); return }
         
         if (session == null) {
             var exception: Exception? = null; var message: String? = null
@@ -57,10 +69,7 @@ class ARActivity : AppCompatActivity(), GLSurfaceView.Renderer {
                         config.geospatialMode = Config.GeospatialMode.ENABLED
                         session?.configure(config)
                     }
-                    ArCoreApk.InstallStatus.INSTALL_REQUESTED -> {
-                        userRequestedInstall = false
-                        return
-                    }
+                    ArCoreApk.InstallStatus.INSTALL_REQUESTED -> { userRequestedInstall = false; return }
                 }
             } catch (e: Exception) {
                 exception = e; message = "Error creating AR session: ${e.javaClass.simpleName}"
@@ -70,28 +79,20 @@ class ARActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         
         try {
             session?.resume()
-        } catch (e: CameraNotAvailableException) {
-            Log.e(TAG, "Camera not available on resume", e)
-            finish()
-            return
-        }
+        } catch (e: CameraNotAvailableException) { Log.e(TAG, "Camera not available", e); finish(); return }
         surfaceView.onResume()
         displayRotationHelper.onResume()
     }
 
     override fun onPause() {
         super.onPause()
-        if (session != null) {
-            displayRotationHelper.onPause()
-            surfaceView.onPause()
-            session?.pause()
-        }
+        if (session != null) { displayRotationHelper.onPause(); surfaceView.onPause(); session?.pause() }
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0.1f, 0.1f, 0.1f, 1.0f)
         backgroundRenderer.createOnGlThread()
-        objectRenderer.createOnGlThread(this)
+        textRenderer.createOnGlThread(this)
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -107,42 +108,41 @@ class ARActivity : AppCompatActivity(), GLSurfaceView.Renderer {
                 currentSession.setCameraTextureName(backgroundRenderer.textureId)
                 val frame = currentSession.update(); val camera = frame.camera
                 backgroundRenderer.draw(frame)
-                
+
                 val earth = currentSession.earth ?: return@let
                 if (earth.trackingState == TrackingState.TRACKING) {
                     
-                    if (anchor == null) {
-                        val cameraPose = earth.cameraGeospatialPose
-                        val altitude = cameraPose.altitude
-                        // Place the test anchor roughly 10 meters north of the user
-                        val latitude = cameraPose.latitude + 0.0001
-                        val longitude = cameraPose.longitude
-                        
-                        Log.d(TAG, "Creating Geospatial Anchor at lat:$latitude, lon:$longitude")
-                        anchor = earth.createAnchor(latitude, longitude, altitude, 0f, 0f, 0f, 1f)
+                    synchronized(shoutsToCreate) {
+                        shoutsToCreate.forEach { shout ->
+                           val altitude = earth.cameraGeospatialPose.altitude
+                           val anchor = earth.createAnchor(shout.lat, shout.lng, altitude, 0f, 0f, 0f, 1f)
+                           placedShouts.add(ShoutAnchor(anchor, shout))
+                        }
+                        shoutsToCreate.clear()
                     }
 
-                    anchor?.let {
-                         if (it.trackingState == TrackingState.TRACKING) {
-                            val projectionMatrix = FloatArray(16); camera.getProjectionMatrix(projectionMatrix, 0, 0.1f, 1000.0f)
-                            val viewMatrix = FloatArray(16); camera.getViewMatrix(viewMatrix, 0)
-                            val anchorMatrix = FloatArray(16); it.pose.toMatrix(anchorMatrix, 0)
-                            objectRenderer.draw(anchorMatrix, viewMatrix, projectionMatrix)
-                         }
+                    val projectionMatrix = FloatArray(16); camera.getProjectionMatrix(projectionMatrix, 0, 0.1f, 1000.0f)
+                    val viewMatrix = FloatArray(16); camera.getViewMatrix(viewMatrix, 0)
+                    val cameraPosition = floatArrayOf(camera.pose.tx(), camera.pose.ty(), camera.pose.tz())
+                    
+                    placedShouts.forEach { shoutAnchor ->
+                        if (shoutAnchor.anchor.trackingState == TrackingState.TRACKING) {
+                            val anchorMatrix = FloatArray(16)
+                            shoutAnchor.anchor.pose.toMatrix(anchorMatrix, 0)
+                            textRenderer.draw(anchorMatrix, viewMatrix, projectionMatrix, cameraPosition, shoutAnchor.shout.text)
+                        }
                     }
+                } else {
+                     Log.d(TAG, "Geospatial State: ${earth.earthState}")
                 }
             } catch (t: Throwable) { Log.e(TAG, "Exception on DrawFrame", t) }
         }
     }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<String>,
-        grantResults: IntArray
-    ) {
+    
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (!CameraPermissionHelper.hasCameraPermission(this)) {
-            Toast.makeText(this, "Camera permission is needed to run this application", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Camera permission is needed", Toast.LENGTH_LONG).show()
             if (!CameraPermissionHelper.shouldShowRequestPermissionRationale(this)) {
                 CameraPermissionHelper.launchPermissionSettings(this)
             }

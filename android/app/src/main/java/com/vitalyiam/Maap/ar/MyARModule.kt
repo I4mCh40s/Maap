@@ -1,5 +1,3 @@
-// Path: android/app/src/main/java/com/vitalyiam/Maap/ar/MyARModule.kt
-
 package com.vitalyiam.Maap.ar
 
 import android.content.Intent
@@ -16,11 +14,14 @@ class MyARModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
         promise.resolve("Hello, $name from your custom Kotlin module!")
     }
 
+    // THIS FUNCTION IS CRUCIAL AND WAS MISSING
     @ReactMethod
-    fun launchARActivity() {
+    fun launchARActivityWithShouts(shoutsJson: String) {
         val currentActivity = reactApplicationContext.currentActivity
         if (currentActivity != null) {
             val intent = Intent(currentActivity, ARActivity::class.java)
+            // This is how you pass data to a new Activity
+            intent.putExtra("shouts", shoutsJson)
             currentActivity.startActivity(intent)
         }
     }
