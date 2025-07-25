@@ -147,33 +147,56 @@ export default function MapScreen({ route, navigation }: any) {
   // NEW: Data for the filter pills, including the "All" option
   const filterPills = useMemo(() => [{ id: 'all', name: 'All pins' }, ...userPinLists], [userPinLists]);
 
-  // Handler function to launch the native AR screen
-// MODIFIED: This function will now take an array of shouts to display
+// Helper function to convert Lat/Lng difference into local AR meters [x, y, z]
+const getOffsetFromGPS = (
+  userLat: number, userLng: number,
+  shoutLat: number, shoutLng: number
+): [number, number, number] => {
+  const toRad = (x: number) => x * Math.PI / 180;
+  const R = 6371000; // Earth radius in meters
+
+  const dLat = toRad(shoutLat - userLat);
+  const dLng = toRad(shoutLng - userLng);
+  
+  // Convert latitude and longitude differences to meters
+  // x is East(+) / West(-)
+  // z is South(+) / North(-)
+  const x = dLng * Math.cos(toRad(userLat)) * R;
+  const z = dLat * R;
+  
+  // ARCore's coordinate system: +X is right (East), +Y is up, -Z is forward (North)
+  // We place shouts at eye level, so y=0
+  return [x, 0, -z];
+};
+
 const launchAR = () => {
-    if (Platform.OS !== 'android' || !MyARModule) {
-        Alert.alert("Unsupported", "AR features are only available on Android for now.");
-        return;
-    }
+  if (Platform.OS !== 'android' || !MyARModule) {
+    Alert.alert("Unsupported", "AR features are not available on this device.");
+    return;
+  }
 
-    // Use the 'visiblePublicItems' state that you already have!
-    // This state already contains the shouts that are near the user.
-    if (visiblePublicItems.length === 0) {
-        Alert.alert("No Shouts Nearby", "There are no public shouts in your immediate vicinity. Try walking around or create one!");
-        return;
-    }
+  // Ensure we have the user's current location to act as the "center of the universe"
+  if (!userCoords) {
+      Alert.alert("Location Unknown", "Could not get your current location. Please wait a moment and try again.");
+      return;
+  }
 
-    // Format the data for our native module (lat, lng instead of position)
-    const shoutsForAR = visiblePublicItems.map(item => ({
-        id: item.id,
-        text: item.text,
-        lat: item.lat,
-        lng: item.lng
-    }));
+  if (visiblePublicItems.length === 0) {
+    Alert.alert("No Shouts Nearby", "There are no public shouts in your immediate vicinity. Try walking around or create one!");
+    return;
+  }
 
-    const shoutsJsonString = JSON.stringify(shoutsForAR);
+  // Format the data for our native module, converting GPS to local AR coordinates for each shout
+  const shoutsForAR = visiblePublicItems.map(item => ({
+    id: item.id,
+    text: item.text,
+    position: getOffsetFromGPS(userCoords.lat, userCoords.lng, item.lat, item.lng)
+  }));
 
-    // We use the same native method, as it just passes the string
-    MyARModule.launchARActivityWithShouts(shoutsJsonString);
+  const shoutsJsonString = JSON.stringify(shoutsForAR);
+  
+  // This calls the correct function, which is already in your MyARModule.kt
+  MyARModule.launchARActivityWithShouts(shoutsJsonString);
 };
 
 

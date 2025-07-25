@@ -26,11 +26,7 @@
           android:value="required" 
           tools:node="replace"/>
 
-      <!-- GEOSPATIAL API KEY (Remember to paste your actual key) -->
-      <meta-data 
-          android:name="com.google.android.geo.API_KEY"
-          android:value="AIzaSyDli0z--QEWo8WEEPOdB4zsaTpQXw_FAJU" />
-
+      
       <!-- Your Main Activity -->
       <activity
         android:name=".MainActivity"
