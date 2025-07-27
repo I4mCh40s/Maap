@@ -1,183 +1,127 @@
 // src/navigation/AppTabs.tsx
 import React from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
-import { useSafeAreaInsets }   from 'react-native-safe-area-context';
-import { createBottomTabNavigator }           from '@react-navigation/bottom-tabs';
-import { createNativeStackNavigator }         from '@react-navigation/native-stack';
-import { MaterialCommunityIcons }             from '@expo/vector-icons';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import theme from '../theme';
 
-import MapScreen      from '../screens/MapScreen';
-import SpinScreen     from '../screens/SpinScreen';
-import ProfileScreen  from '../screens/ProfileScreen';
+import MapScreen from '../screens/MapScreen';
+import ProfileScreen from '../screens/ProfileScreen';
 
 type TabParamList = {
-  Home: {
-    screen?: 'Map';
-    params?: { openCreateModal?: boolean };
-  };
-  Add: undefined;
+  Map: { openCreateModal?: boolean };
+  // We only need two "real" tabs. The plus button is a separate UI element.
   Profile: undefined;
 };
 
-const Tab       = createBottomTabNavigator<TabParamList>();
-const HomeStack = createNativeStackNavigator();
+const Tab = createBottomTabNavigator<TabParamList>();
 
-function HomeStackScreen() {
+// This is our fully custom tab bar component, inspired by your original code.
+function CustomTabBar({ state, navigation }: any) {
+  // `state.index` tells us which tab is active. 0 for Map, 1 for Profile.
+  const isMapActive = state.index === 0;
+  const isProfileActive = state.index === 1;
+
   return (
-    <HomeStack.Navigator screenOptions={{ headerShown: false }}>
-      <HomeStack.Screen 
-        name="Map" 
-        component={MapScreen} 
-        initialParams={{ openCreateModal: false }}
-      />
-      <HomeStack.Screen 
-        name="PowerUp" 
-        component={SpinScreen} 
-        options={{ presentation: 'modal' }}
-      />
-    </HomeStack.Navigator>
+    // This is the main container that holds the pill and the plus button
+    <View style={styles.tabBarContainer}>
+
+      {/* The floating dark grey pill */}
+      <View style={styles.tabBarPill}>
+        {/* Map Button */}
+        <TouchableOpacity
+          onPress={() => navigation.navigate('Map')}
+          style={styles.tabButton}
+        >
+          <MaterialCommunityIcons
+            name={isMapActive ? 'map' : 'map-outline'}
+            color={isMapActive ? theme.colors.white : theme.colors.lightGrey}
+            size={28}
+          />
+        </TouchableOpacity>
+
+        {/* This empty View creates the space for the plus button */}
+        <View style={{ width: 60 }} /> 
+
+        {/* Profile Button */}
+        <TouchableOpacity
+          onPress={() => navigation.navigate('Profile')}
+          style={styles.tabButton}
+        >
+          <MaterialCommunityIcons
+            name={isProfileActive ? 'account-circle' : 'account-circle-outline'}
+            color={isProfileActive ? theme.colors.white : theme.colors.lightGrey}
+            size={28}
+          />
+        </TouchableOpacity>
+      </View>
+
+      {/* The floating plus button, sits on top */}
+      <TouchableOpacity
+        style={styles.plusButton}
+        onPress={() => navigation.navigate('Map', { openCreateModal: true })}
+      >
+        <MaterialCommunityIcons name="plus" size={28} color={theme.colors.black} />
+      </TouchableOpacity>
+    </View>
   );
 }
 
-
 export default function AppTabs() {
-  const insets = useSafeAreaInsets();
-
-  function CustomTabBar({ state, descriptors, navigation }: any) {
-    const isProfileScreen = state.index === 2;
-
-    if (isProfileScreen) {
-      // Render the floating pill tab bar for the Profile screen (no plus button)
-      return (
-        <View style={[ styles.customTabBarContainer, { bottom: insets.bottom > 0 ? insets.bottom : 8 } ]}>
-            <View style={styles.profileFloatingTabBar}>
-                <TouchableOpacity
-                    accessibilityRole="button"
-                    onPress={() => navigation.navigate('Home', { screen: 'Map' })}
-                    style={styles.tabButton}
-                    activeOpacity={0.7}
-                >
-                    <MaterialCommunityIcons name="home" size={28} color={'#8E8E93'} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: true }}
-                    onPress={() => navigation.navigate('Profile')}
-                    style={styles.tabButton}
-                    activeOpacity={0.7}
-                >
-                    <MaterialCommunityIcons name="account" size={28} color={'#fff'} />
-                </TouchableOpacity>
-            </View>
-        </View>
-      );
-    }
-
-    // Render the floating tab bar with the plus button for the Home screen
-    return (
-      <View style={[ styles.customTabBarContainer, { bottom: insets.bottom > 0 ? insets.bottom : 8 } ]}>
-        <View style={styles.customTabBar}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityState={state.index === 0 ? { selected: true } : {}}
-            onPress={() => navigation.navigate('Home', { screen: 'Map' })}
-            style={styles.tabButton}
-            activeOpacity={0.7}
-          >
-            <MaterialCommunityIcons name="home" size={28} color={state.index === 0 ? '#fff' : '#8E8E93'} />
-          </TouchableOpacity>
-
-          <View style={{ flex: 1 }} />
-
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityState={state.index === 2 ? { selected: true } : {}}
-            onPress={() => navigation.navigate('Profile')}
-            style={styles.tabButton}
-            activeOpacity={0.7}
-          >
-            <MaterialCommunityIcons name="account" size={28} color={state.index === 2 ? '#fff' : '#8E8E93'} />
-          </TouchableOpacity>
-        </View>
-        
-        <TouchableOpacity
-          style={styles.plusButton} 
-          activeOpacity={0.8}
-          onPress={() => {
-            navigation.navigate('Home', { screen: 'Map', params: { openCreateModal: true } });
-          }}
-        >
-          <MaterialCommunityIcons name="plus" size={32} color="#fff" />
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
   return (
     <Tab.Navigator
+      // We pass our custom component to the `tabBar` prop
       tabBar={props => <CustomTabBar {...props} />}
       screenOptions={{
         headerShown: false,
       }}
     >
-      <Tab.Screen name="Home" component={HomeStackScreen} />
-      <Tab.Screen name="Add" component={View} listeners={{ tabPress: e => e.preventDefault() }} />
+      <Tab.Screen name="Map" component={MapScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );
 }
 
 const styles = StyleSheet.create({
-  customTabBarContainer: {
+  // The main container for positioning
+  tabBarContainer: {
     position: 'absolute',
+    bottom: 25,
     left: 0,
     right: 0,
+    height: 65,
+    alignItems: 'center', // Centers the pill and plus button horizontally
+  },
+  // The dark grey floating pill
+  tabBarPill: {
+    flexDirection: 'row',
+    backgroundColor: theme.colors.darkGrey,
+    width: 240, // Fixed width
+    height: '100%',
+    borderRadius: 40,
+    justifyContent: 'space-between', // Pushes Map and Profile to the ends
     alignItems: 'center',
-  },
-  customTabBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '65%',
-    height: 64,
-    backgroundColor: '#2C2C2E',
-    borderRadius: 32,
+    paddingHorizontal: theme.spacing.md, // Gives space at the ends
+    elevation: 5,
     shadowColor: '#000',
+    shadowOffset: { width: 0, height: 5 },
     shadowOpacity: 0.2,
     shadowRadius: 10,
-    elevation: 10,
   },
-  profileFloatingTabBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    width: '50%', // Make it a bit narrower for two items
-    height: 64,
-    backgroundColor: '#2C2C2E',
-    borderRadius: 32,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 10,
-  },
+  // The touchable area for Map and Profile icons
   tabButton: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    // We don't need flex:1 anymore, the icon itself will be centered
   },
+  // The floating "+" button
   plusButton: {
+    // Sits on top of the pill in the absolute center of the container
     position: 'absolute',
-    top: -12,
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#007AFF',
-    alignItems: 'center',
+    bottom: 7,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: theme.colors.primary,
     justifyContent: 'center',
-    elevation: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 8,
-    borderWidth: 4,
-    borderColor: '#fff',
+    alignItems: 'center',
   },
 });

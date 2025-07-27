@@ -1,5 +1,3 @@
-// --- START: COPY AND REPLACE EVERYTHING IN settings.gradle WITH THIS ---
-
 pluginManagement {
   def reactNativeGradlePlugin = new File(
     providers.exec {
@@ -24,8 +22,6 @@ plugins {
   id("expo-autolinking-settings")
 }
 
-
-
 extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
   if (System.getenv('EXPO_USE_COMMUNITY_AUTOLINKING') == '1') {
     ex.autolinkLibrariesFromCommand()
@@ -41,5 +37,3 @@ expoAutolinking.useExpoVersionCatalog()
 
 include ':app'
 includeBuild(expoAutolinking.reactNativeGradlePlugin)
-
-// --- END OF FILE ---

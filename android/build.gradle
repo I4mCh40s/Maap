@@ -22,21 +22,15 @@ def reactNativeAndroidDir = new File(
 
 allprojects {
   repositories {
-        // This is for ARCore, Geospatial, and all modern Android libraries.
-        google() 
-
-        // This is for most standard open-source libraries.
-        mavenCentral()
-
-        // This is needed for some React Native community libraries.
-        maven { url 'https://www.jitpack.io' }
-
-        // This is required for React Native itself.
-        maven {
-            // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
-            url("$rootDir/../node_modules/react-native/android")
-        }
+    maven {
+      // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
+      url(reactNativeAndroidDir)
     }
+
+    google()
+    mavenCentral()
+    maven { url 'https://www.jitpack.io' }
+  }
 }
 
 apply plugin: "expo-root-project"

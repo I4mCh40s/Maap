@@ -26,6 +26,9 @@
       "edgeToEdgeEnabled": true,
       "package": "com.vitalyiam.Maap"
     },
+    "plugins": [
+      "./plugins/withNFCReader.js"
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     },

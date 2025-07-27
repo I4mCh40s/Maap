@@ -11,469 +11,214 @@ import { auth, db } from '../firebase';
 import {
   collection, query, where, onSnapshot, orderBy,
   doc, deleteDoc, Timestamp, addDoc, serverTimestamp,
-  updateDoc, getDocs
+  updateDoc
 } from 'firebase/firestore';
+import theme from '../theme';
 
-type PublicItem = { id: string; text: string; createdAt: Timestamp | null; expiresAt: Timestamp; likeCount: number; type: 'shout' | 'spot'; };
-type PinItem = {
-  id: string;
-  text: string;
-  createdAt: Timestamp | null;
-  lat: number;
-  lng: number;
-  listIds?: string[];
+type BreadcrumbItem = {
+  id: string; text: string; createdAt: Timestamp | null;
+  lat: number; lng: number; trailIds?: string[];
 };
-type PinList = { id: string; name: string; pinCount: number; };
+type Trail = { 
+  id: string; name: string; breadcrumbCount: number; 
+};
 
 export default function ProfileScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const user = auth.currentUser;
   const uid = user?.uid;
 
-  const [activeTab, setActiveTab] = useState<'pins' | 'shouts'>('pins');
-  const [publicItems, setPublicItems] = useState<PublicItem[]>([]);
-  const [allPins, setAllPins] = useState<PinItem[]>([]);
-  const [pinLists, setPinLists] = useState<PinList[]>([]);
-  const [selectedList, setSelectedList] = useState<PinList | null>(null);
-  const [pinsInSelectedList, setPinsInSelectedList] = useState<PinItem[]>([]);
+  // --- STATE ---
+  const [allBreadcrumbs, setAllBreadcrumbs] = useState<BreadcrumbItem[]>([]);
+  const [trails, setTrails] = useState<Trail[]>([]);
+  const [selectedTrail, setSelectedTrail] = useState<Trail | null>(null);
+  const [breadcrumbsInSelectedTrail, setBreadcrumbsInSelectedTrail] = useState<BreadcrumbItem[]>([]);
   const [isListDetailLoading, setIsListDetailLoading] = useState(false);
-  const [isCreateListModalVisible, setCreateListModalVisible] = useState(false);
-  const [newListName, setNewListName] = useState('');
+  const [isCreateTrailModalVisible, setCreateTrailModalVisible] = useState(false);
+  const [newTrailName, setNewTrailName] = useState('');
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<{ isVerified: boolean; isMerchant: boolean; photoURL?: string | null; }>({ isVerified: false, isMerchant: false });
-
-  // NEW STATE FOR EDIT MODAL
   const [isEditModalVisible, setEditModalVisible] = useState(false);
-  const [listNameToEdit, setListNameToEdit] = useState('');
+  const [trailNameToEdit, setTrailNameToEdit] = useState('');
 
-  // NEW: State for the refresh control
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // --- DATA FETCHING HOOKS ---
-
+  // --- DATA FETCHING ---
   useEffect(() => {
     if (!uid) return;
     const ref = doc(db, 'users', uid);
-    const unsub = onSnapshot(ref, snap => {
-      if (snap.exists()) {
-        const d = snap.data();
-        setProfile({ isVerified: !!d.isVerified, isMerchant: !!d.isMerchant, photoURL: d.photoURL ?? null });
-      }
-    });
+    const unsub = onSnapshot(ref, snap => { if (snap.exists()) { const d = snap.data(); setProfile({ isVerified: !!d.isVerified, isMerchant: !!d.isMerchant, photoURL: d.photoURL ?? null }); } });
     return unsub;
   }, [uid]);
 
   useEffect(() => {
-    if (!uid) { setAllPins([]); setLoading(false); return; }
+    if (!uid) { setAllBreadcrumbs([]); setLoading(false); return; }
     const q = query(collection(db, 'pins'), where('ownerId', '==', uid), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, snap => {
-        const items = snap.docs.map(d => {
-            const data = d.data();
-            return {
-                id: d.id,
-                text: data.text as string,
-                createdAt: data.createdAt as Timestamp,
-                lat: data.location.latitude,
-                lng: data.location.longitude,
-                listIds: data.listIds || []
-            };
-        });
-        setAllPins(items);
-        setLoading(false);
+        const items = snap.docs.map(d => { const data = d.data(); return { id: d.id, text: data.text as string, createdAt: data.createdAt as Timestamp, lat: data.location.latitude, lng: data.location.longitude, trailIds: data.listIds || [] }; });
+        setAllBreadcrumbs(items); setLoading(false);
     });
     return unsub;
   }, [uid]);
 
   useEffect(() => {
-    if (!uid) { setPinLists([]); return; }
+    if (!uid) { setTrails([]); return; }
     const q = query(collection(db, 'pin_lists'), where('ownerId', '==', uid), orderBy('name', 'asc'));
     const unsub = onSnapshot(q, snap => {
-        const lists = snap.docs.map(d => ({ id: d.id, name: d.data().name, pinCount: 0 }));
-        setPinLists(lists);
+        const lists = snap.docs.map(d => ({ id: d.id, name: d.data().name, breadcrumbCount: 0 }));
+        setTrails(lists);
     });
     return unsub;
   }, [uid]);
 
   useEffect(() => {
-    if (!uid) { setPublicItems([]); return; }
-    const q = query(collection(db, 'public_items'), where('ownerId', '==', uid), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, snap => {
-        const items = snap.docs.map(d => {
-          const data = d.data();
-          return { id: d.id, text: data.text as string, createdAt: data.createdAt as Timestamp, expiresAt: data.expiresAt as Timestamp, likeCount: data.likeCount as number, type: data.type as 'shout' | 'spot' };
-        });
-        setPublicItems(items);
-    });
-    return unsub;
-  }, [uid]);
-  
-  useEffect(() => {
-    if (!selectedList || !uid) { setPinsInSelectedList([]); return; };
+    if (!selectedTrail || !uid) { setBreadcrumbsInSelectedTrail([]); return; };
     setIsListDetailLoading(true);
-    if (selectedList.id === 'all_pins') {
-      setPinsInSelectedList(allPins);
-      setIsListDetailLoading(false);
-      return;
-    } 
-    const q = query( collection(db, 'pins'), where('ownerId', '==', uid), where('listIds', 'array-contains', selectedList.id), orderBy('createdAt', 'desc') );
+    if (selectedTrail.id === 'all_breadcrumbs') { setBreadcrumbsInSelectedTrail(allBreadcrumbs); setIsListDetailLoading(false); return; }
+    const q = query(collection(db, 'pins'), where('ownerId', '==', uid), where('listIds', 'array-contains', selectedTrail.id), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, snap => {
-        const items = snap.docs.map(d => {
-            const data = d.data();
-            return { id: d.id, text: data.text as string, createdAt: data.createdAt as Timestamp, lat: data.location.latitude, lng: data.location.longitude };
-        });
-        setPinsInSelectedList(items);
-        setIsListDetailLoading(false);
+        const items = snap.docs.map(d => { const data = d.data(); return { id: d.id, text: data.text as string, createdAt: data.createdAt as Timestamp, lat: data.location.latitude, lng: data.location.longitude, trailIds: data.trailIds }; });
+        setBreadcrumbsInSelectedTrail(items); setIsListDetailLoading(false);
     });
     return unsub;
-  }, [selectedList, uid, allPins]);
-
-  // --- HANDLER FUNCTIONS ---
-
-  // NEW: Handler for the pull-to-refresh action
-  const onRefresh = async () => {
-    if (!uid) return;
-    setIsRefreshing(true);
-    try {
-      // Manually re-fetch the shouts using getDocs for a one-time read
-      const q = query(collection(db, 'public_items'), where('ownerId', '==', uid), orderBy('createdAt', 'desc'));
-      const querySnapshot = await getDocs(q);
-      const items = querySnapshot.docs.map(d => {
-        const data = d.data();
-        return { id: d.id, text: data.text as string, createdAt: data.createdAt as Timestamp, expiresAt: data.expiresAt as Timestamp, likeCount: data.likeCount as number, type: data.type as 'shout' | 'spot' };
-      });
-      setPublicItems(items);
-    } catch (error) {
-      console.error("Failed to refresh shouts:", error);
-      Alert.alert("Refresh failed", "Could not fetch latest shouts.");
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  const handleFlyToPin = (pin: PinItem) => {
-    navigation.navigate('Home', { screen: 'Map', params: { flyToCoords: { lat: pin.lat, lng: pin.lng } } });
-  };
-
-  const handleCreateList = async () => {
-    if (!newListName.trim() || !uid) return;
-    try {
-      await addDoc(collection(db, 'pin_lists'), { ownerId: uid, name: newListName.trim(), createdAt: serverTimestamp() });
-      setNewListName('');
-      setCreateListModalVisible(false);
-    } catch (error) { Alert.alert('Error', 'Could not create list.'); }
-  };
-
-  const handleRenameList = async () => {
-    if (!selectedList || !listNameToEdit.trim()) return;
-    const listRef = doc(db, 'pin_lists', selectedList.id);
-    try {
-      await updateDoc(listRef, { name: listNameToEdit.trim() });
-      setEditModalVisible(false);
-      setSelectedList(prev => prev ? { ...prev, name: listNameToEdit.trim() } : null);
-    } catch (error) { console.error("Error renaming list: ", error); Alert.alert('Error', 'Could not rename list.'); }
-  };
-
-  const handleDeleteList = async () => {
-    if (!selectedList) return;
-    try {
-      await deleteDoc(doc(db, 'pin_lists', selectedList.id));
-      setEditModalVisible(false);
-      setSelectedList(null);
-    } catch (error) { console.error("Error deleting list: ", error); Alert.alert('Error', 'Could not delete list.'); }
-  };
-
-  const confirmDelete = () => {
-    Alert.alert( "Delete List", `Are you sure you want to delete "${selectedList?.name}"? Pins in this list will NOT be deleted.`,
-      [ { text: "Cancel", style: "cancel" }, { text: "Delete", style: "destructive", onPress: handleDeleteList } ]
-    );
-  };
-
-  const openEditModal = () => {
-    if (!selectedList) return;
-    setListNameToEdit(selectedList.name);
-    setEditModalVisible(true);
-  };
-
-  const combinedPinLists = useMemo(() => {
-    const counts: { [key: string]: number } = {};
-    for (const pin of allPins) {
-      if (pin.listIds) {
-        for (const listId of pin.listIds) {
-          counts[listId] = (counts[listId] || 0) + 1;
-        }
-      }
-    }
-    const listsWithCounts = pinLists.map(list => ({ ...list, pinCount: counts[list.id] || 0 }));
-    return [{ id: 'all_pins', name: 'All pins', pinCount: allPins.length }, ...listsWithCounts];
-  }, [allPins, pinLists]);
-
-  async function handleLogout() {
-    try { await signOut(auth); } catch (e: any) { Alert.alert('Logout failed', e.message); }
-  }
-
-  // --- RENDER FUNCTIONS ---
+  }, [selectedTrail, uid, allBreadcrumbs]);
   
-  const renderPublicItem = ({ item }: { item: PublicItem }) => {
-    const minutesLeft = item.expiresAt ? Math.max(0, Math.ceil((item.expiresAt.toMillis() - Date.now()) / 60000)) : 0;
-    return (
-      <View style={styles.card}>
-        <Text style={styles.cardText}>{item.text}</Text>
-        <View style={styles.cardMeta}>
-          <Text style={styles.cardDate}>{item.createdAt?.toDate().toLocaleDateString() || ''}</Text>
-          <Text style={styles.cardExpiry}>Expires in {minutesLeft} min</Text>
-        </View>
-        <View style={styles.cardFooter}>
-          <Text style={styles.cardLikes}>❤️ {item.likeCount}</Text>
-          <TouchableOpacity style={styles.deleteButton} onPress={() => deleteDoc(doc(db, 'public_items', item.id))}>
-            <MaterialCommunityIcons name="trash-can-outline" size={20} color="#E53935" />
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
-  const renderPinItem = ({ item }: { item: PinItem }) => {
-    return (
-      <TouchableOpacity style={styles.pinCard} onPress={() => handleFlyToPin(item)}>
-        <View style={{flexDirection: 'row', alignItems: 'center'}}>
-          <View style={styles.listItemIconContainer}>
-              <MaterialCommunityIcons name="map-marker" size={24} color="#555" />
-          </View>
-          <View style={{flex: 1}}>
-              <Text style={styles.cardText}>{item.text}</Text>
-          </View>
-        </View>
-        <Text style={styles.cardDate}>{item.createdAt?.toDate().toLocaleDateString() || ''}</Text>
-      </TouchableOpacity>
-    );
-  };
+  // --- HANDLERS ---
+  const handleFlyToBreadcrumb = (item: BreadcrumbItem) => navigation.navigate('Map', { flyToCoords: { lat: item.lat, lng: item.lng } });
+  const handleCreateTrail = async () => { if (!newTrailName.trim() || !uid) return; try { await addDoc(collection(db, 'pin_lists'), { ownerId: uid, name: newTrailName.trim(), createdAt: serverTimestamp() }); setNewTrailName(''); setCreateTrailModalVisible(false); } catch (error) { Alert.alert('Error', 'Could not create Trail.'); } };
+  const handleRenameTrail = async () => { if (!selectedTrail || !trailNameToEdit.trim()) return; const trailRef = doc(db, 'pin_lists', selectedTrail.id); try { await updateDoc(trailRef, { name: trailNameToEdit.trim() }); setEditModalVisible(false); setSelectedTrail(prev => prev ? { ...prev, name: trailNameToEdit.trim() } : null); } catch (error) { console.error("Error renaming Trail: ", error); Alert.alert('Error', 'Could not rename Trail.'); } };
+  const handleDeleteTrail = async () => { if (!selectedTrail) return; try { await deleteDoc(doc(db, 'pin_lists', selectedTrail.id)); setEditModalVisible(false); setSelectedTrail(null); } catch (error) { console.error("Error deleting Trail: ", error); Alert.alert('Error', 'Could not delete Trail.'); } };
+  const confirmDeleteTrail = () => Alert.alert( "Delete Trail", `Are you sure you want to delete "${selectedTrail?.name}"?`, [ { text: "Cancel", style: "cancel" }, { text: "Delete", style: "destructive", onPress: handleDeleteTrail } ]);
+  const openEditModal = () => { if (!selectedTrail) return; setTrailNameToEdit(selectedTrail.name); setEditModalVisible(true); };
+  const handleLogout = async () => { try { await signOut(auth); } catch (e: any) { Alert.alert('Logout failed', e.message); } }
+  
+  const combinedTrails = useMemo(() => { const counts: { [key: string]: number } = {}; for (const breadcrumb of allBreadcrumbs) { if (breadcrumb.trailIds) { for (const trailId of breadcrumb.trailIds) { counts[trailId] = (counts[trailId] || 0) + 1; } } } const listsWithCounts = trails.map(list => ({ ...list, breadcrumbCount: counts[list.id] || 0 })); return [{ id: 'all_breadcrumbs', name: 'All Breadcrumbs', breadcrumbCount: allBreadcrumbs.length }, ...listsWithCounts]; }, [allBreadcrumbs, trails]);
 
-  const renderPinListItem = ({ item }: { item: PinList }) => (
-    <TouchableOpacity style={styles.listItem} onPress={() => setSelectedList(item)}>
+  const renderBreadcrumbItem = ({ item }: { item: BreadcrumbItem }) => (
+    <TouchableOpacity style={styles.breadcrumbCard} onPress={() => handleFlyToBreadcrumb(item)}>
+        <View style={styles.breadcrumbCardIconContainer}>
+            <MaterialCommunityIcons name="map-marker-outline" size={24} color={theme.colors.lightGrey} />
+        </View>
+        <View style={{ flex: 1, marginRight: theme.spacing.sm }}>
+            <Text style={styles.breadcrumbCardText} numberOfLines={1}>{item.text}</Text>
+        </View>
+        <View>
+            <Text style={styles.breadcrumbCardDate}>
+                {item.createdAt?.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) || ''}
+            </Text>
+        </View>
+    </TouchableOpacity>
+  );
+  
+  // --- THIS IS THE CORRECTED RENDER FUNCTION ---
+  const renderTrailItem = ({ item }: { item: Trail }) => (
+    <TouchableOpacity style={styles.listItem} onPress={() => setSelectedTrail(item)}>
         <View style={styles.listItemIconContainer}>
-            <MaterialCommunityIcons name="map-marker" size={24} color="#555" />
+            <MaterialCommunityIcons name="shoe-print" size={24} color={theme.colors.lightGrey} />
         </View>
-        <View style={styles.listItemTextContainer}>
+        <View style={{ flex: 1 }}>
             <Text style={styles.listItemTitle}>{item.name}</Text>
-            <Text style={styles.listItemSubtitle}>{item.pinCount} {item.pinCount === 1 ? 'pin' : 'pins'}</Text>
+            {/* Using a template literal `` to create a single string expression */}
+            <Text style={styles.listItemSubtitle}>
+                {`${item.breadcrumbCount} ${item.breadcrumbCount === 1 ? 'breadcrumb' : 'breadcrumbs'}`}
+            </Text>
         </View>
-        <MaterialCommunityIcons name="chevron-right" size={24} color="#CCC" />
+        <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.mediumGrey} />
     </TouchableOpacity>
   );
 
-  const PinListsView = () => (
-    <FlatList
-        data={combinedPinLists}
-        renderItem={renderPinListItem}
-        keyExtractor={item => item.id}
-        contentContainerStyle={styles.listContainer}
-    />
-  );
-
-  
+  // --- Main Render ---
   return (
     <SafeAreaView style={styles.safe}>
-      {selectedList ? (
-        // --- RENDER LIST DETAIL VIEW ---
-        <>
+      {selectedTrail ? (
+        <View style={styles.detailViewContainer}>
           <View style={[styles.detailHeader, { paddingTop: insets.top }]}>
-              <TouchableOpacity onPress={() => setSelectedList(null)} style={styles.backButton}>
-                  <MaterialCommunityIcons name="arrow-left" size={24} color="#333" />
-              </TouchableOpacity>
-              <Text style={styles.detailTitle}>{selectedList.name}</Text>
-              {selectedList.id !== 'all_pins' ? (
-                  <TouchableOpacity onPress={openEditModal} style={styles.editButton}>
-                      <Text style={styles.editButtonText}>Edit</Text>
-                  </TouchableOpacity>
-              ) : <View style={{width: 50}} /> }
+            <TouchableOpacity onPress={() => setSelectedTrail(null)} style={styles.backButton}><MaterialCommunityIcons name="arrow-left" size={24} color={theme.colors.white} /></TouchableOpacity>
+            <Text style={styles.detailTitle}>{selectedTrail.name}</Text>
+            {selectedTrail.id !== 'all_breadcrumbs' ? <TouchableOpacity onPress={openEditModal} style={styles.editButton}><MaterialCommunityIcons name="pencil-outline" size={24} color={theme.colors.primary} /></TouchableOpacity> : <View style={styles.editButton} />}
           </View>
-          {isListDetailLoading ? <ActivityIndicator style={{marginTop: 40}}/> : (
-              <FlatList
-                  data={pinsInSelectedList}
-                  renderItem={renderPinItem}
-                  keyExtractor={item => item.id}
-                  contentContainerStyle={styles.listContainer}
-                  ListEmptyComponent={<Text style={styles.noShouts}>No pins in this list yet.</Text>}
-              />
+          {isListDetailLoading ? <ActivityIndicator style={{ marginTop: 40 }} color={theme.colors.primary} /> : (
+            <FlatList data={breadcrumbsInSelectedTrail} renderItem={renderBreadcrumbItem} keyExtractor={item => item.id} contentContainerStyle={styles.listContainer} ListEmptyComponent={<Text style={styles.noItems}>No breadcrumbs in this trail yet.</Text>} />
           )}
-        </>
+        </View>
       ) : (
-        // --- RENDER MAIN PROFILE VIEW ---
         <>
           <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
             <View style={styles.titleRow}>
-              <Text style={styles.title}>Your Profile</Text>
-              <TouchableOpacity onPress={handleLogout} style={styles.logoutIcon}>
-                <MaterialCommunityIcons name="logout" size={26} color="#333" />
-              </TouchableOpacity>
+              <Text style={styles.title}>Your Trails</Text>
+              <TouchableOpacity onPress={handleLogout}><MaterialCommunityIcons name="logout" size={26} color={theme.colors.lightGrey} /></TouchableOpacity>
             </View>
             <View style={styles.headerRow}>
               {profile.photoURL ? (<Image source={{ uri: profile.photoURL }} style={styles.avatar} />) : (<View style={styles.avatarPlaceholder}><Text style={styles.avatarText}>{(user?.displayName ?? 'M').charAt(0)}</Text></View>)}
-              <View style={{ marginLeft: 12, flex: 1 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={styles.displayName}>{user?.displayName ?? 'Maap'}</Text>
-                  {profile.isMerchant ? (<MaterialCommunityIcons name="storefront" size={18} color="#FF7043" style={styles.badgeIcon} />) : profile.isVerified ? (<MaterialCommunityIcons name="check-decagram" size={18} color="#3BAEFC" style={styles.badgeIcon} />) : null}
-                </View>
-                <Text style={styles.email} numberOfLines={1}>{user?.email ?? 'vlasweb@yandex.ru'}</Text>
+              <View style={{ marginLeft: theme.spacing.md, flex: 1 }}>
+                <Text style={styles.displayName}>{user?.displayName ?? 'Maap'}</Text>
+                <Text style={styles.email} numberOfLines={1}>{user?.email ?? ''}</Text>
               </View>
-            </View>
-            <View style={styles.segmentedControlContainer}>
-              <TouchableOpacity style={[styles.segmentButton, activeTab === 'pins' && styles.segmentButtonActive]} onPress={() => setActiveTab('pins')}>
-                <Text style={[styles.segmentButtonText, activeTab === 'pins' && styles.segmentButtonTextActive]}>My Pins</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.segmentButton, activeTab === 'shouts' && styles.segmentButtonActive]} onPress={() => setActiveTab('shouts')}>
-                <Text style={[styles.segmentButtonText, activeTab === 'shouts' && styles.segmentButtonTextActive]}>My Shouts</Text>
+              <TouchableOpacity onPress={() => setCreateTrailModalVisible(true)}>
+                <MaterialCommunityIcons name="plus-circle-outline" size={32} color={theme.colors.primary} />
               </TouchableOpacity>
             </View>
           </View>
-          
-          {loading ? (<ActivityIndicator size="large" style={{ marginTop: 40 }} />) : (
-            <View style={{ flex: 1 }}>
-              {activeTab === 'pins' ? <PinListsView /> : (
-                <FlatList 
-                  data={publicItems} 
-                  renderItem={renderPublicItem} 
-                  keyExtractor={item => item.id} 
-                  contentContainerStyle={styles.listContainer} 
-                  ListEmptyComponent={<Text style={styles.noShouts}>You haven’t posted any public items.</Text>}
-                  onRefresh={onRefresh}
-                  refreshing={isRefreshing}
-                />
-              )}
-            </View>
+
+          {loading ? (
+            <ActivityIndicator size="large" color={theme.colors.primary} style={{ marginTop: 40 }} />
+          ) : (
+            <FlatList
+              data={combinedTrails}
+              renderItem={renderTrailItem}
+              keyExtractor={item => item.id}
+              contentContainerStyle={styles.listContainer}
+              ListEmptyComponent={<Text style={styles.noItems}>Drop a breadcrumb on the map to start your first Trail!</Text>}
+            />
           )}
         </>
       )}
 
-      {activeTab === 'pins' && !selectedList && (
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={() => setCreateListModalVisible(true)}
-        >
-          <MaterialCommunityIcons name="plus" size={28} color="white" />
-        </TouchableOpacity>
-      )}
-
-      <Modal visible={isCreateListModalVisible} transparent animationType="fade">
-        <View style={styles.backdrop}>
-            <View style={styles.modalCard}>
-                <Text style={styles.modalTitle}>Create New List</Text>
-                <TextInput
-                    style={styles.modalInput}
-                    placeholder="List name"
-                    value={newListName}
-                    onChangeText={setNewListName}
-                />
-                <View style={styles.actionsRow}>
-                    <TouchableOpacity style={styles.actionButton} onPress={() => setCreateListModalVisible(false)}><Text>Cancel</Text></TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionButton, styles.confirmButton]} onPress={handleCreateList}><Text style={styles.confirmButtonText}>Create</Text></TouchableOpacity>
-                </View>
-            </View>
-        </View>
+      {/* --- Modals --- */}
+      <Modal visible={isCreateTrailModalVisible} transparent animationType="fade">
+          <View style={styles.modalBackdrop}><View style={styles.modalCard}><Text style={styles.modalTitle}>Create New Trail</Text><TextInput style={styles.modalInput} placeholder="Trail name..." placeholderTextColor={theme.colors.lightGrey} value={newTrailName} onChangeText={setNewTrailName} /><View style={styles.modalActionsRow}><TouchableOpacity style={styles.modalButton} onPress={() => setCreateTrailModalVisible(false)}><Text style={styles.modalButtonText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[styles.modalButton, styles.modalConfirmButton]} onPress={handleCreateTrail}><Text style={styles.modalConfirmButtonText}>Create</Text></TouchableOpacity></View></View></View>
       </Modal>
-
       <Modal visible={isEditModalVisible} transparent animationType="fade">
-          <View style={styles.backdrop}>
-              <View style={styles.modalCard}>
-                  <Text style={styles.modalTitle}>Edit List</Text>
-                  <TextInput
-                      style={styles.modalInput}
-                      value={listNameToEdit}
-                      onChangeText={setListNameToEdit}
-                  />
-                  <View style={styles.actionsRow}>
-                    <TouchableOpacity style={styles.actionButton} onPress={() => setEditModalVisible(false)}>
-                      <Text>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionButton, styles.confirmButton]} onPress={handleRenameList}>
-                      <Text style={styles.confirmButtonText}>Save</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <TouchableOpacity 
-                    style={styles.deleteListButton} 
-                    onPress={confirmDelete}
-                  >
-                      <Text style={styles.deleteListButtonText}>Delete List</Text>
-                  </TouchableOpacity>
-              </View>
-          </View>
+          <View style={styles.modalBackdrop}><View style={styles.modalCard}><Text style={styles.modalTitle}>Edit Trail</Text><TextInput style={styles.modalInput} value={trailNameToEdit} onChangeText={setTrailNameToEdit} placeholderTextColor={theme.colors.lightGrey} /><View style={styles.modalActionsRow}><TouchableOpacity style={styles.modalButton} onPress={() => setEditModalVisible(false)}><Text style={styles.modalButtonText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[styles.modalButton, styles.modalConfirmButton]} onPress={handleRenameTrail}><Text style={styles.modalConfirmButtonText}>Save</Text></TouchableOpacity></View><TouchableOpacity style={styles.deleteButton} onPress={confirmDeleteTrail}><Text style={styles.deleteButtonText}>Delete Trail</Text></TouchableOpacity></View></View>
       </Modal>
     </SafeAreaView>
   );
 }
 
+// --- Stylesheet ---
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#FFF' },
-  headerContainer: { paddingHorizontal: 16, backgroundColor: '#FFF', paddingBottom: 8 },
-  titleRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 12,
-    position: 'relative',
-  },
-  title: { fontSize: 22, fontWeight: '700', color: '#333' },
-  logoutIcon: {
-    position: 'absolute',
-    right: 0,
-    padding: 4,
-  },
-  listContainer: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 120 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 24 },
-  avatar: { width: 64, height: 64, borderRadius: 32 },
-  avatarPlaceholder: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 28, color: '#555', fontWeight: '500' },
-  displayName: { fontSize: 20, fontWeight: 'bold', color: '#222' },
-  badgeIcon: { marginLeft: 8 },
-  email: { fontSize: 16, color: '#666', marginTop: 2 },
-  noShouts: { fontSize: 16, color: '#777', textAlign: 'center', marginTop: 40 },
-  card: { backgroundColor: '#F8F8F8', borderRadius: 8, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#EAEAEA' },
-  pinCard: { backgroundColor: '#FFF', borderRadius: 12, paddingVertical: 8, paddingHorizontal: 16, marginBottom: 8, borderWidth: 1, borderColor: '#F0F0F0' },
-  cardText: { fontSize: 15, color: '#222', lineHeight: 20 },
-  cardFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
-  cardMeta: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  cardDate: { color: '#999', fontSize: 12, textAlign: 'right', marginTop: 4 },
-  cardLikes: { fontSize: 14, color: '#E53935', fontWeight: '500' },
-  cardExpiry: { color: '#E53935', fontSize: 12, fontStyle: 'italic' },
-  deleteButton: { padding: 4 },
-  segmentedControlContainer: { flexDirection: 'row', backgroundColor: '#F0F0F0', borderRadius: 10, padding: 2, },
-  segmentButton: { flex: 1, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 8, },
-  segmentButtonActive: { backgroundColor: '#007AFF' },
-  segmentButtonText: { fontWeight: '600', fontSize: 14, color: '#666', },
-  segmentButtonTextActive: { color: '#FFF', },
-  listItem: { backgroundColor: '#FFF', flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 4, },
-  listItemIconContainer: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginRight: 12, },
-  listItemTextContainer: { flex: 1, borderBottomWidth: 1, borderBottomColor: '#F0F0F0', paddingBottom: 16, paddingTop: 4 },
-  listItemTitle: { fontSize: 16, fontWeight: '500', color: '#333' },
-  listItemSubtitle: { fontSize: 14, color: '#888', marginTop: 2 },
-  detailHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#EAEAEA', backgroundColor: '#FFF', },
-  detailTitle: { flex: 1, textAlign: 'center', fontSize: 18, fontWeight: 'bold', color: '#333', },
-  backButton: { padding: 8 },
-  editButton: { width: 50, alignItems: 'center', justifyContent: 'center', padding: 8, },
-  editButtonText: { color: '#1976FF', fontWeight: '600', fontSize: 16, },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalCard: { width: '90%', backgroundColor: '#FFF', borderRadius: 12, padding: 20 },
-  modalTitle: { fontSize: 20, fontWeight: '600', marginBottom: 16, textAlign: 'center' },
-  modalInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, padding: 12, marginBottom: 20 },
-  actionsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, gap: 8, },
-  actionButton: { flex: 1,  padding: 12, alignItems: 'center', borderRadius: 8, backgroundColor: '#EEE', },
-  confirmButton: { backgroundColor: '#1976FF' },
-  confirmButtonText: { color: '#FFF', fontWeight: 'bold' },
-  deleteListButton: { marginTop: 12, backgroundColor: '#E53935', padding: 12, alignItems: 'center', borderRadius: 8, },
-  deleteListButtonText: { color: '#FFF', fontWeight: 'bold' },
-  fab: {
-    position: 'absolute',
-    width: 56,
-    height: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-    right: 24,
-    bottom: 96,
-    backgroundColor: '#E53935',
-    borderRadius: 28,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowRadius: 5,
-    shadowOpacity: 0.3,
-    shadowOffset: { height: 2, width: 0 },
-  },
+    safe: { flex: 1, backgroundColor: theme.colors.black },
+    headerContainer: { paddingHorizontal: theme.spacing.md, borderBottomWidth: 1, borderBottomColor: theme.colors.mediumGrey },
+    titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: theme.spacing.sm },
+    title: { fontSize: theme.fontSizes.h2, fontWeight: '700', color: theme.colors.white },
+    headerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: theme.spacing.lg },
+    avatar: { width: 64, height: 64, borderRadius: 32 },
+    avatarPlaceholder: { width: 64, height: 64, borderRadius: 32, backgroundColor: theme.colors.mediumGrey, justifyContent: 'center', alignItems: 'center' },
+    avatarText: { fontSize: 32, color: theme.colors.white, fontWeight: '500' },
+    displayName: { fontSize: theme.fontSizes.h3, fontWeight: 'bold', color: theme.colors.white },
+    email: { fontSize: theme.fontSizes.body, color: theme.colors.lightGrey, marginTop: theme.spacing.xs },
+    noItems: { fontSize: 16, color: theme.colors.lightGrey, textAlign: 'center', marginTop: 40, paddingHorizontal: 20 },
+    listContainer: { paddingHorizontal: theme.spacing.md, paddingTop: theme.spacing.md, paddingBottom: 100 },
+    listItem: { backgroundColor: theme.colors.darkGrey, borderRadius: 16, padding: theme.spacing.md, flexDirection: 'row', alignItems: 'center', marginBottom: theme.spacing.sm },
+    listItemIconContainer: { width: 48, height: 48, borderRadius: 12, backgroundColor: theme.colors.mediumGrey, justifyContent: 'center', alignItems: 'center', marginRight: theme.spacing.md },
+    listItemTitle: { fontSize: theme.fontSizes.body, fontWeight: '600', color: theme.colors.white },
+    listItemSubtitle: { fontSize: theme.fontSizes.caption, color: theme.colors.lightGrey, marginTop: theme.spacing.xs },
+    detailViewContainer: { flex: 1, backgroundColor: theme.colors.black },
+    detailHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: theme.spacing.sm, paddingBottom: theme.spacing.md, backgroundColor: theme.colors.black, borderBottomWidth: 1, borderBottomColor: theme.colors.mediumGrey },
+    detailTitle: { fontSize: theme.fontSizes.h3, fontWeight: 'bold', color: theme.colors.white },
+    backButton: { padding: theme.spacing.sm, width: 50 },
+    editButton: { padding: theme.spacing.sm, width: 50, alignItems: 'flex-end' },
+    breadcrumbCard: { backgroundColor: theme.colors.darkGrey, borderRadius: 16, padding: theme.spacing.md, flexDirection: 'row', alignItems: 'center', marginBottom: theme.spacing.sm },
+    breadcrumbCardIconContainer: { width: 48, height: 48, borderRadius: 12, backgroundColor: theme.colors.mediumGrey, justifyContent: 'center', alignItems: 'center', marginRight: theme.spacing.md },
+    breadcrumbCardText: { flex: 1, fontSize: theme.fontSizes.body, color: theme.colors.white },
+    breadcrumbCardDate: { fontSize: theme.fontSizes.caption, color: theme.colors.lightGrey },
+    modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
+    modalCard: { width: '90%', backgroundColor: theme.colors.darkGrey, borderRadius: 16, padding: theme.spacing.lg },
+    modalTitle: { fontSize: theme.fontSizes.h3, fontWeight: '600', marginBottom: theme.spacing.lg, textAlign: 'center', color: theme.colors.white },
+    modalInput: { backgroundColor: theme.colors.black, color: theme.colors.white, borderWidth: 1, borderColor: theme.colors.mediumGrey, borderRadius: 12, padding: theme.spacing.md, marginBottom: theme.spacing.xl, fontSize: theme.fontSizes.body },
+    modalActionsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing.md },
+    modalButton: { flex: 1, padding: theme.spacing.md, alignItems: 'center', borderRadius: 12, backgroundColor: theme.colors.mediumGrey },
+    modalButtonText: { color: theme.colors.white, fontWeight: 'bold' },
+    modalConfirmButton: { backgroundColor: theme.colors.primary },
+    modalConfirmButtonText: { color: theme.colors.black, fontWeight: 'bold' },
+    deleteButton: { marginTop: theme.spacing.md, backgroundColor: theme.colors.danger, padding: theme.spacing.md, alignItems: 'center', borderRadius: 12 },
+    deleteButtonText: { color: theme.colors.white, fontWeight: 'bold' },
 });
