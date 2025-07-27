@@ -27,7 +27,8 @@
       "package": "com.vitalyiam.Maap"
     },
     "plugins": [
-      "./plugins/withNFCReader.js"
+      "./plugins/withNFCReader.js",
+      "expo-secure-store"
     ],
     "web": {
       "favicon": "./assets/favicon.png"
