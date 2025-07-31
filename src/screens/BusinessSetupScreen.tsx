@@ -19,7 +19,13 @@ import { BusinessProfile } from '../core/types';
 
 type RootStackParamList = { BusinessSetup: { isEditing?: boolean, businessId?: string, businessLogoUrl?: string }; };
 type BusinessSetupRouteProp = RouteProp<RootStackParamList, 'BusinessSetup'>;
-type BusinessSetupNavigationProp = { navigate: (screen: string, params?: any) => void; goBack: () => void; };
+type BusinessSetupNavigationProp = {
+    // navigate: (screen: string, params?: any) => void; <-- No longer needed in this shape
+    // goBack: () => void;
+    // --- The new, more powerful type ---
+    reset: (state: { index: number; routes: { name: string; params?: any }[] }) => void;
+    goBack: () => void;
+};
 
 const BusinessSetupScreen = () => {
     const insets = useSafeAreaInsets();
@@ -166,7 +172,13 @@ const BusinessSetupScreen = () => {
                 businessId: businessDocRef.id 
                 }, { merge: true });
                 Alert.alert('Success', 'Your business is registered!');
-                navigation.navigate('BusinessDashboard', { businessId: businessDocRef.id });
+                navigation.reset({
+                index: 1, // We want the new "stack" to be on the second screen
+                routes: [
+                    { name: 'Main' }, // Put the main Map/Profile tabs at the bottom of the stack
+                    { name: 'BusinessDashboard', params: { businessId: businessDocRef.id } } // And put the Dashboard on top
+                ],
+            });
             }
         } catch (error: any) {
             console.error("Save profile failed:", error);

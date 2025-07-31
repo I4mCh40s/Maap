@@ -11,7 +11,9 @@ import {
   Platform,
   StatusBar,
   Modal,
-  Image
+  Image,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -24,6 +26,7 @@ import theme from '../theme';
 import { geohashQueryBounds } from 'geofire-common';
 import { Vault, UserProfile } from '../core/types';
 import { calculateDistance } from '../core/utils';
+import { useIsFocused } from '@react-navigation/native'; 
 
 
 
@@ -43,30 +46,12 @@ export default function MapScreen({ route, navigation }: any) {
   const [distance, setDistance] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const isClaimed = userProfile?.redeemedVaults?.includes(selectedVault?.id || '');
+  const isScreenFocused = useIsFocused();
+  const locationSubscription = useRef<Location.LocationSubscription | null>(null);
 
   // --- EFFECT HOOKS ---
 
-  // Add this new useEffect inside your MapScreen component
-useEffect(() => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) {
-        setUserProfile(null); // Clear profile on logout
-        return;
-    }
-
-    const userDocRef = doc(db, 'users', uid);
-    const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
-        if (docSnap.exists()) {
-            setUserProfile(docSnap.data() as UserProfile);
-        } else {
-            // This might happen if a user's doc wasn't created on signup
-            console.log("No user profile document found for UID:", uid);
-        }
-    });
-
-    return () => unsubscribe(); // Cleanup listener on unmount
-}, [auth.currentUser]); // Re-run when the user logs in or out
-  
+   
   // Handles "fly-to" requests
   useEffect(() => {
     if (route.params?.flyToCoords) {
@@ -88,93 +73,89 @@ useEffect(() => {
     return unsubscribe;
   }, [navigation, route.params]);
 
-  // Core location tracking logic
+// --- EFFECT: Listen for User Profile ---
   useEffect(() => {
-    let sub: Location.LocationSubscription | undefined;
-    const initializeLocation = async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
-      
-      const initialLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const initialCoords = { lat: initialLocation.coords.latitude, lng: initialLocation.coords.longitude };
-      setUserCoords(initialCoords);
-      setMapCenter(initialCoords);
+    const uid = auth.currentUser?.uid;
+    if (!uid) { setUserProfile(null); return; }
+    const userDocRef = doc(db, 'users', uid);
+    const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
+        if (docSnap.exists()) { setUserProfile(docSnap.data() as UserProfile); }
+    });
+    return () => unsubscribe();
+  }, [auth.currentUser]);
 
-      sub = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Highest, timeInterval: 5000, distanceInterval: 10 },
-        ({ coords }) => {
-          const pos = { lat: coords.latitude, lng: coords.longitude };
-          setUserCoords(pos);
-          const js = `if (window.userMarker) window.userMarker.setLngLat([${pos.lng}, ${pos.lat}]);`;
-          wv.current?.injectJavaScript(`${js} true;`);
-        }
-      );
-    };
-    initializeLocation().catch(console.error);
-    return () => sub?.remove();
-  }, []);
-
-  // Listener for geohashed vaults
-  // src/screens/MapScreen.tsx
-
-// --- REPLACE THE ENTIRE V VAULT LISTENER useEffect WITH THIS ---
-
-useEffect(() => {
+  // --- EFFECT: Listen for Vaults based on User Location ---
+  useEffect(() => {
     if (!userCoords) return;
-
     const center = [userCoords.lat, userCoords.lng] as [number, number];
-    const radiusInM = 10 * 1000; // 10km radius
+    const radiusInM = 10 * 1000;
     const bounds = geohashQueryBounds(center, radiusInM);
-    
-    // This creates an array of unsubscribe functions, one for each query.
     const unsubscribes = bounds.map(b => {
-      const q = query(
-        collection(db, 'vaults'),
-        orderBy('geohash'),
-        startAt(b[0]),
-        endAt(b[1]),
-        where('isActive', '==', true)
-      );
-
-      // Return the unsubscribe function provided by onSnapshot
+      const q = query(collection(db, 'vaults'), orderBy('geohash'), startAt(b[0]), endAt(b[1]), where('isActive', '==', true));
       return onSnapshot(q, (snapshot) => {
-        // Use docChanges() to get granular updates
         snapshot.docChanges().forEach((change) => {
           const vaultData = { id: change.doc.id, ...change.doc.data() } as Vault;
-
           if (change.type === 'removed') {
-            console.log("Vault REMOVED:", vaultData.id);
-            // If a vault is removed, filter it out of the current state
             setVaults(prevVaults => prevVaults.filter(v => v.id !== vaultData.id));
-
-          } else { // This handles both 'added' and 'modified' types
-            console.log("Vault ADDED or MODIFIED:", vaultData.id);
+          } else {
             setVaults(prevVaults => {
-              // Create a Map from the previous state for efficient lookups
               const vaultMap = new Map(prevVaults.map(v => [v.id, v]));
-              // Add or update the new/changed vault
               vaultMap.set(vaultData.id, vaultData);
-              // Convert the Map back to an array to set the new state
               return Array.from(vaultMap.values());
             });
           }
         });
       });
     });
+    return () => { unsubscribes.forEach(unsub => unsub()); };
+  }, [userCoords]);
 
-    // When the component unmounts or userCoords change, call all unsubscribe functions
-    return () => {
-      unsubscribes.forEach(unsub => unsub());
-    };
-}, [userCoords]);
-
-  // Redraws markers on map
+  // --- EFFECT: Manage Live Location Tracking ---
   useEffect(() => {
-    if (!ready || !vaults) return;
+    const startLocationTracking = async () => {
+      if (locationSubscription.current) return;
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+
+      if (!userCoords) {
+          const initialLocation = await Location.getCurrentPositionAsync({});
+          const initialCoords = { lat: initialLocation.coords.latitude, lng: initialLocation.coords.longitude };
+          setUserCoords(initialCoords);
+          if (!mapCenter) setMapCenter(initialCoords);
+      }
+
+      locationSubscription.current = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 3000, distanceInterval: 10 },
+        (location) => {
+          const pos = { lat: location.coords.latitude, lng: location.coords.longitude };
+          setUserCoords(pos);
+          wv.current?.injectJavaScript(`if(window.userMarker) window.userMarker.setLngLat([${pos.lng}, ${pos.lat}]); true;`);
+        }
+      );
+    };
+
+    const stopLocationTracking = () => {
+      if (locationSubscription.current) {
+        locationSubscription.current.remove();
+        locationSubscription.current = null;
+      }
+    };
+    
+    if (isScreenFocused) {
+      startLocationTracking();
+    } else {
+      stopLocationTracking();
+    }
+
+    return () => stopLocationTracking();
+  }, [isScreenFocused]);
+
+  // Redraws markers on map (depends on userProfile to get claimed status right)
+  useEffect(() => {
+    if (!ready || !vaults || !userProfile) return;
     const markerArray = JSON.stringify(vaults);
-    const js = `addMarkers(${markerArray});`;
-    wv.current?.injectJavaScript(`${js} true;`);
-  }, [ready, vaults]);
+    wv.current?.injectJavaScript(`addMarkers(${markerArray}); true;`);
+  }, [ready, vaults, userProfile]);
 
   
   // --- HANDLER FUNCTIONS ---

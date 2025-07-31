@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, SafeAreaView, StatusBar
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, SafeAreaView, StatusBar, AppState
 } from 'react-native';
 import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -45,39 +45,111 @@ const VaultHuntScreen = () => {
   // Effect to fetch initial data and start watching location
   useEffect(() => {
     let locationSubscription: Location.LocationSubscription | null = null;
-    const setupHunt = async () => {
-        // We will fetch the vault FIRST.
-        const vaultDocRef = doc(db, 'vaults', vaultId);
-        const docSnap = await getDoc(vaultDocRef);
-        if (!docSnap.exists()) throw new Error('Vault not found.');
-        const fetchedVault = { id: docSnap.id, ...docSnap.data() } as Vault;
-        setVault(fetchedVault);
+    let isMounted = true; // Flag to prevent state updates after component unmounts
 
-        // We can set loading false here, the map will show a spinner until location is ready.
-        setIsLoading(false);
+    // Function to start the location watcher
+    const startLocationUpdates = (fetchedVault: Vault) => {
+        // Clean up any existing subscription before creating a new one
+        if (locationSubscription) {
+            locationSubscription.remove();
+        }
         
-        let { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') throw new Error('Location permission is required.');
-        
-        // This subscription now handles ALL user location updates.
-        locationSubscription = await Location.watchPositionAsync(
+        Location.watchPositionAsync(
             { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 2000, distanceInterval: 5 },
             (newLocation) => {
-                const currentUserLocation = { lat: newLocation.coords.latitude, lng: newLocation.coords.longitude };
-                // Set the user location ONCE for the initial map render, then only update state.
-                setUserLocation(current => current ? current : currentUserLocation);
+                // If the component has unmounted while waiting for an update, do nothing
+                if (!isMounted) return;
 
-                const distString = calculateDistance(currentUserLocation.lat, currentUserLocation.lng, fetchedVault.location.latitude, fetchedVault.location.longitude);
+                const currentUserLocation = { lat: newLocation.coords.latitude, lng: newLocation.coords.longitude };
+                
+                const distString = calculateDistance(
+                    currentUserLocation.lat, currentUserLocation.lng, 
+                    fetchedVault.location.latitude, fetchedVault.location.longitude
+                );
                 setDistance(distString);
-                const rawDistanceMeters = getRawDistance(currentUserLocation.lat, currentUserLocation.lng, fetchedVault.location.latitude, fetchedVault.location.longitude);
+                
+                const rawDistanceMeters = getRawDistance(
+                    currentUserLocation.lat, currentUserLocation.lng, 
+                    fetchedVault.location.latitude, fetchedVault.location.longitude
+                );
                 setIsUserInProximity(rawDistanceMeters <= PROXIMITY_RADIUS_METERS);
+                
+                // Send live location updates to the WebView to move the user marker
                 wv.current?.injectJavaScript(`updateUserMarker(${currentUserLocation.lat}, ${currentUserLocation.lng});`);
             }
-        );
+        ).then(sub => {
+            // Only store the subscription if the component is still mounted
+            if (isMounted) {
+                locationSubscription = sub;
+            }
+        });
     };
-    setupHunt().catch(e => { Alert.alert('Error', e.message, [{ text: 'OK', onPress: () => navigation.goBack() }]) });
-    return () => { locationSubscription?.remove(); };
-}, [vaultId]);
+
+    // Function to stop the location watcher
+    const stopLocationUpdates = () => {
+        if (locationSubscription) {
+            locationSubscription.remove();
+            locationSubscription = null;
+            console.log("Stopped location tracking on VaultHuntScreen.");
+        }
+    };
+    
+    // Create the listener for AppState changes
+    const appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+        // If the app is coming into the foreground AND we have vault data
+        if (nextAppState === 'active' && vault) {
+            console.log("VaultHuntScreen is active, restarting location tracking.");
+            startLocationUpdates(vault);
+        } else {
+            // If the app is going to the background, stop listening to save battery and prevent crashes
+            stopLocationUpdates();
+        }
+    });
+
+    // Main setup function that runs when the screen mounts
+    const setupHunt = async () => {
+        try {
+            // 1. Fetch Vault Data
+            const vaultDocRef = doc(db, 'vaults', vaultId);
+            const docSnap = await getDoc(vaultDocRef);
+            if (!docSnap.exists()) {
+                throw new Error('This vault no longer exists.');
+            }
+            const fetchedVault = { id: docSnap.id, ...docSnap.data() } as Vault;
+            if (isMounted) setVault(fetchedVault);
+
+            // 2. Get initial location and start watching for the first time
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                throw new Error('Location permission is required for this feature.');
+            }
+
+            // Get one high-accuracy position to start with
+            const initialLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+            const initialUserLocation = { lat: initialLoc.coords.latitude, lng: initialLoc.coords.longitude };
+            if (isMounted) setUserLocation(initialUserLocation);
+
+            // Start the continuous location watcher
+            startLocationUpdates(fetchedVault);
+
+        } catch (e: any) {
+            Alert.alert('Error', e.message, [{ text: 'OK', onPress: () => navigation.goBack() }]);
+        } finally {
+            if (isMounted) {
+                setIsLoading(false);
+            }
+        }
+    };
+    
+    setupHunt();
+
+    // Cleanup function that runs when the component unmounts
+    return () => {
+        isMounted = false; // Set flag to false
+        stopLocationUpdates(); // Stop location watcher
+        appStateSubscription.remove(); // Remove the app state listener
+    };
+}, [vaultId]); // Dependency array ensures this only runs once when the screen is opened
 
 const mapHtml = useMemo(() => {
     // THIS is now the single point of truth. HTML is only generated when BOTH are ready.
