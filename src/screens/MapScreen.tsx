@@ -10,7 +10,8 @@ import {
   ActivityIndicator,
   Platform,
   StatusBar,
-  Modal
+  Modal,
+  Image
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -221,14 +222,42 @@ function onWebMessage(evt: any) {
     const TOMTOM_KEY = 'zoyiO1lknbi8bagOcFtqev5TcihUwvbR';
     return `
       <!DOCTYPE html><html><head>
-        <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+        <meta charset="utf-g"/><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
         <script src="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.0/maps/maps-web.min.js"></script>
         <link href="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.0/maps/maps.css" rel="stylesheet"/>
         <style>
           html,body,#map{margin:0;padding:0;width:100%;height:100%}
           .user-marker {width:12px;height:12px;background:rgba(0,150,255,1);border:2px solid #FFF;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,.4);}
-          .vault-marker { width: 28px; height: 28px; background: #FFD700; border: 2px solid #FFF; border-radius: 50%; cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 16px; font-weight: bold; color: #8B4513; box-shadow: 0 0 8px rgba(0,0,0,0.5); }
-          .vault-marker::after { content: 'V'; }
+          
+          /* --- BASE STYLE FOR ALL VAULTS --- */
+          .vault-marker {
+            width: 28px; height: 28px; 
+            border: 2px solid #FFF;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex; justify-content: center; align-items: center;
+            font-size: 16px; font-weight: bold;
+            box-shadow: 0 0 8px rgba(0,0,0,0.5);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; /* Use system font for icons */
+          }
+
+          /* --- CATEGORY-SPECIFIC STYLES --- */
+          /* Default/Other */
+          .vault-marker-other { background: #FFD700; color: #8B4513; }
+          .vault-marker-other::after { content: 'V'; } /* V for Vault */
+          
+          /* Cafe */
+          .vault-marker-cafe { background: #964B00; color: #FFF; }
+          .vault-marker-cafe::after { content: '☕'; } /* Coffee icon */
+
+          /* Food */
+          .vault-marker-food { background: #DC143C; color: #FFF; }
+          .vault-marker-food::after { content: '🍴'; } /* Fork & Knife icon */
+          
+          /* Retail */
+          .vault-marker-retail { background: #4169E1; color: #FFF; }
+          .vault-marker-retail::after { content: '🛍️'; } /* Shopping bag icon */
+          
         </style>
       </head><body>
         <div id="map"></div>
@@ -243,11 +272,13 @@ function onWebMessage(evt: any) {
             markers.forEach(m => m.remove()); markers = [];
             items.forEach(item => {
               const el = document.createElement('div');
-              el.className = 'vault-marker';
+              // --- DYNAMICALLY SET THE CLASS BASED ON CATEGORY ---
+              el.className = 'vault-marker vault-marker-' + (item.category || 'other');
+              
               el.onclick = (event) => {
                 event.stopPropagation();
-                console.log('WebView CLICKED on vault ID: ' + item.id);
-                postToApp({ type: 'vaultTap', id: item.id }); };
+                postToApp({ type: 'vaultTap', id: item.id });
+              };
               const m = new tt.Marker({ element: el }).setLngLat([item.location.longitude, item.location.latitude]).addTo(map);
               markers.push(m);
             });
@@ -300,8 +331,21 @@ return (
                 {/* The white floating card */}
                 <TouchableOpacity activeOpacity={1} style={styles.modalCard}>
                     <View style={styles.cardContent}>
-                         {/* --- Header --- */}
+                        {/* --- Header --- */}
                         <View style={styles.cardHeader}>
+                            {/* --- NEW LOGO DISPLAY --- */}
+                            {selectedVault?.businessLogoUrl ? (
+                                <Image 
+                                    source={{ uri: selectedVault.businessLogoUrl }} 
+                                    style={styles.logoImage} 
+                                />
+                            ) : (
+                                // Fallback for vaults without a logo
+                                <View style={styles.logoPlaceholder}>
+                                    <MaterialCommunityIcons name="store-outline" size={24} color="#888" />
+                                </View>
+                            )}
+
                             <Text style={styles.cardTitle}>{selectedVault?.businessName}</Text>
                         </View>
                         {/* --- Sub-header --- */}
@@ -313,16 +357,18 @@ return (
                         
                         {/* --- Info Row --- */}
                         <View style={styles.infoRow}>
-                            <MaterialCommunityIcons name="gift-outline" size={20} color={'#8A8A8E'} />
-                            <Text style={styles.infoLabel}>Rewards Remaining:</Text>
-                            <Text style={styles.infoValue}>
-                                {(selectedVault?.totalQuantity || 0) - (selectedVault?.claimedQuantity || 0)}
-                            </Text>
-                        </View>
-                        {/* --- NEW DISTANCE ITEM --- */}
-                        <View style={styles.infoItem}>
-                            <MaterialCommunityIcons name="map-marker-distance" size={20} color={'#8A8A8E'} />
-                            <Text style={styles.infoLabel}>{distance}</Text>
+                            {/* First item */}
+                            <View style={styles.infoItem}>
+                                <MaterialCommunityIcons name="gift-outline" size={20} color={'#8A8A8E'} />
+                                <Text style={styles.infoLabel}>
+                                    {(selectedVault?.totalQuantity || 0) - (selectedVault?.claimedQuantity || 0)} Remaining
+                                </Text>
+                            </View>
+                            {/* Second item, now in the same flex container */}
+                            <View style={styles.infoItem}>
+                                <MaterialCommunityIcons name="map-marker-distance" size={20} color={'#8A8A8E'} />
+                                <Text style={styles.infoLabel}>{distance}</Text>
+                            </View>
                         </View>
                         {/* --- CTA Button --- */}
                         <TouchableOpacity style={styles.ctaButton} onPress={handleBeginHunt}>
@@ -377,12 +423,15 @@ const styles = StyleSheet.create({
     },
     cardContent: {}, // Wrapper for content if needed
     cardHeader: {
+        flexDirection: 'row', // Make items align horizontally
+        alignItems: 'center',  // Align items vertically in the center
         marginBottom: 8,
     },
     cardTitle: {
         fontSize: 24,
         fontWeight: 'bold',
         color: '#1D1D1F',
+        flex: 1, // Allows text to wrap if it's too long
     },
     cardSubHeader: {
         marginBottom: 20,
@@ -429,5 +478,21 @@ const styles = StyleSheet.create({
         color: 'white',
         fontSize: 18,
         fontWeight: 'bold',
+    },
+    logoImage: {
+        width: 44,
+        height: 44,
+        borderRadius: 8,
+        marginRight: 12, // Space between logo and text
+        backgroundColor: '#f0f0f0' // A light background color for loading
+    },
+    logoPlaceholder: {
+        width: 44,
+        height: 44,
+        borderRadius: 8,
+        marginRight: 12,
+        backgroundColor: '#E5E5EA', // A neutral grey
+        justifyContent: 'center',
+        alignItems: 'center',
     },
 });

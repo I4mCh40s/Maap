@@ -74,6 +74,8 @@ const CreateVaultScreen = () => {
             await addDoc(collection(db, 'vaults'), {
                 businessId: businessId,
                 businessName: businessProfile.name,
+                category: businessProfile.category,
+                businessLogoUrl: businessProfile.logoUrl || null,
                 publicName,
                 privateReward,
                 redemptionCode,

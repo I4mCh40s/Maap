@@ -13,6 +13,8 @@ export interface BusinessProfile {
   ownerUid: string;
   name: string;
   category: 'food' | 'retail' | 'cafe' | 'other';
+  logoUrl?: string;
+  location?: GeoPoint; 
   address: string;
   latitude: number;
   longitude: number;
@@ -22,6 +24,8 @@ export interface Vault {
   id: string;
   businessId: string;
   businessName: string; // Denormalized for easy map display
+  category: 'cafe' | 'retail' | 'food' | 'other';
+  businessLogoUrl?: string;
   
   // Public "teaser" info
   publicName: string; // e.g., "A Caffeinated Reward"

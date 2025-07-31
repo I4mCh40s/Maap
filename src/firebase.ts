@@ -3,6 +3,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
+import { getStorage } from "firebase/storage";
 
 // ← Paste your Web‐app config here from the console
 const firebaseConfig = {

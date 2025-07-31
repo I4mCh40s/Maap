@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, SafeAreaView
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, SafeAreaView, StatusBar
 } from 'react-native';
 import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -15,6 +15,7 @@ import { NativeModules } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import { calculateDistance } from '../core/utils'; // Assuming this returns a string like "123 m away"
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { NFCModule } = NativeModules;
 
@@ -27,6 +28,7 @@ type VaultHuntNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 const PROXIMITY_RADIUS_METERS = 50;
 
 const VaultHuntScreen = () => {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<VaultHuntNavigationProp>();
   const route = useRoute<VaultHuntRouteProp>();
   const { vaultId } = route.params;
@@ -93,33 +95,41 @@ const VaultHuntScreen = () => {
   }, [vaultId]);
 
   const mapHtml = useMemo(() => {
-      if (!vault || !userLocation) return '';
+      // --- FIX: Ensure BOTH vault and userLocation exist before generating HTML ---
+      if (!vault || !userLocation) return ''; 
       const TOMTOM_KEY = 'zoyiO1lknbi8bagOcFtqev5TcihUwvbR';
 
       return `
         <!DOCTYPE html><html><head>
-          <style>html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden;}</style>
+          <style>html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden; background-color: #333;}</style>
           <script src="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.0/maps/maps-web.min.js"></script>
           <link href="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.0/maps/maps.css" rel="stylesheet"/>
         </head><body><div id="map"></div><script>
-            const map = tt.map({ key: '${TOMTOM_KEY}', container: 'map', center: [${userLocation.lng}, ${userLocation.lat}], zoom: 16, style: "https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAMzJSMkJDa1NmTGNvR2h3RzsO9cOMFdVDGI-DPwgg0BlM.json?key=${TOMTOM_KEY}" });
+            const map = tt.map({ key: '${TOMTOM_KEY}', container: 'map', center: [${userLocation.lng}, ${userLocation.lat}], zoom: 15, style: "https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAMzJSMkJDa1NmTGNvR2h3RzsO9cOMFdVDGI-DPwgg0BlM.json?key=${TOMTOM_KEY}" });
             
             const userMarkerEl = document.createElement('div');
-            userMarkerEl.style.cssText = 'width:14px;height:14px;background:#007AFF;border:2px solid #FFF;border-radius:50%;';
+            userMarkerEl.style.cssText = 'width:14px;height:14px;background:#007AFF;border:2px solid #FFF;border-radius:50%;box-shadow: 0 0 5px #000;';
             let userMarker = new tt.Marker({ element: userMarkerEl }).setLngLat([${userLocation.lng}, ${userLocation.lat}]).addTo(map);
 
             const vaultMarkerEl = document.createElement('div');
-            vaultMarkerEl.style.cssText = 'width:28px;height:28px;background:#FFD700;border:2px solid #FFF;border-radius:50%;display:flex;justify-content:center;align-items:center;font-size:16px;font-weight:bold;color:#8B4513;';
+            vaultMarkerEl.style.cssText = 'width:28px;height:28px;background:#FFD700;border:2px solid #FFF;border-radius:50%;display:flex;justify-content:center;align-items:center;font-size:16px;font-weight:bold;color:#8B4513;box-shadow: 0 0 8px rgba(0,0,0,0.5);';
             vaultMarkerEl.innerHTML = 'V';
             new tt.Marker({ element: vaultMarkerEl }).setLngLat([${vault.location.longitude}, ${vault.location.latitude}]).addTo(map);
 
+            // Zoom the map to fit both markers
+            const bounds = new tt.LngLatBounds();
+            bounds.extend([${userLocation.lng}, ${userLocation.lat}]);
+            bounds.extend([${vault.location.longitude}, ${vault.location.latitude}]);
+            map.fitBounds(bounds, { padding: 80, duration: 500 });
+
             function updateUserMarker(lat, lng) {
                 userMarker.setLngLat([lng, lat]);
-                map.panTo([lng, lat]);
+                map.panTo([lng, lat], { duration: 1000 });
             }
         </script></body></html>`;
-  }, [vault]); // Renders once when vault is loaded
-
+  // --- FIX: Add userLocation to the dependency array ---
+  }, [vault, userLocation]); 
+  
   // Raw distance helper
   const getRawDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
     const R = 6371e3; // metres
@@ -157,19 +167,18 @@ const VaultHuntScreen = () => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-        <MaterialCommunityIcons name="chevron-left" size={36} color={"white"} />
-      </TouchableOpacity>
-
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      
+      {/* MAP CONTAINER - Takes a flex proportion of the screen */}
       <View style={styles.mapContainer}>
-          {vault && userLocation && <WebView ref={wv} source={{ html: mapHtml }} style={{ flex: 1, borderRadius: 16 }}/>}
+          {mapHtml && <WebView key={mapHtml} source={{ html: mapHtml }} style={{ flex: 1 }}/>}
       </View>
       
-      <View style={styles.detailsCard}>
+      {/* DETAILS CARD - Takes its own space at the bottom */}
+      <View style={[styles.detailsCard, { paddingBottom: insets.bottom + 12 }]}>
         <Text style={styles.title}>{vault?.businessName}</Text>
         <Text style={styles.subtitle}>"{vault?.publicName}"</Text>
-        
         <View style={styles.divider} />
         
         <View style={styles.infoBox}>
@@ -179,7 +188,7 @@ const VaultHuntScreen = () => {
             </View>
             <View style={styles.infoItem}>
                 <MaterialCommunityIcons name="gift-outline" size={24} color={'#8A8A8E'}/>
-                <Text style={styles.infoText}>{(vault?.totalQuantity || 0) - (vault?.claimedQuantity || 0)} Remaining</Text>
+                <Text style={styles.infoText}>{((vault?.totalQuantity ?? 0) - (vault?.claimedQuantity ?? 0))} Remaining</Text>
             </View>
         </View>
 
@@ -191,35 +200,54 @@ const VaultHuntScreen = () => {
                   <ActivityIndicator color={theme.colors.black} /> 
               ) : (
                 <>
-                  <MaterialCommunityIcons name="nfc-tap" size={24} color={isUserInProximity ? theme.colors.black : '#555'} />
-                  <Text style={[styles.scanButtonText, !isUserInProximity && { color: '#555'}]}>
+                  <MaterialCommunityIcons name="nfc-tap" size={24} color={isUserInProximity ? theme.colors.black : '#888'} />
+                  <Text style={[styles.scanButtonText, !isUserInProximity && { color: '#888'}]}>
                       {isUserInProximity ? 'Scan to Unlock' : `Get Closer to Scan`}
                   </Text>
                 </>
               )}
         </TouchableOpacity>
       </View>
-
-    </SafeAreaView>
+      
+      {/* BACK BUTTON - Floats on top */}
+      <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.backButton, { top: insets.top + 10 }]}>
+        <MaterialCommunityIcons name="chevron-left" size={36} color={"white"} />
+      </TouchableOpacity>
+    </View>
   );
 };
 
 // Styles have been updated to match your screenshot
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000000', justifyContent: 'flex-end' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000000' },
-  backButton: { position: 'absolute', top: 50, left: 10, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.5)', padding: 4, borderRadius: 25},
+  container: { 
+    flex: 1, 
+    backgroundColor: '#1C1C1E', // Match card color for seamless look
+  },
+  loadingContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    backgroundColor: '#000000' 
+  },
+  backButton: { 
+    position: 'absolute', 
+    left: 15, 
+    zIndex: 10, 
+    backgroundColor: 'rgba(0,0,0,0.5)', 
+    padding: 4, 
+    borderRadius: 25
+  },
   mapContainer: {
-    ...StyleSheet.absoluteFillObject, // Make map fill the background
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    overflow: 'hidden'
+    flex: 0.6, // Gives the map ~60% of the screen height
+    backgroundColor: '#333', // Placeholder background
   },
   detailsCard: {
+      flex: 0.4, // Gives the card ~40% of the screen height
       backgroundColor: '#1C1C1E',
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
-      padding: 24
+      paddingHorizontal: 24,
+      paddingTop: 24
   },
   title: { fontSize: 28, fontWeight: 'bold', color: 'white'},
   subtitle: { fontSize: 16, color: 'grey', fontStyle: 'italic', marginTop: 4, marginBottom: 16},
@@ -228,9 +256,13 @@ const styles = StyleSheet.create({
   infoItem: { flexDirection: 'row', alignItems: 'center' },
   infoText: { color: 'white', fontSize: 16, marginLeft: 8 },
   scanButton: {
-    backgroundColor: theme.colors.primary, flexDirection: 'row',
-    alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 18, borderRadius: 16, marginTop: 12
+    backgroundColor: theme.colors.primary, 
+    flexDirection: 'row',
+    alignItems: 'center', 
+    justifyContent: 'center',
+    paddingVertical: 18, 
+    borderRadius: 16, 
+    marginTop: 12, // Use marginTop to push down from infoBox
   },
   scanButtonDisabled: { backgroundColor: '#3e3e3e' },
   scanButtonText: { color: theme.colors.black, fontSize: 18, fontWeight: 'bold', marginLeft: 12 }
