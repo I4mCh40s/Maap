@@ -11,6 +11,11 @@ const COLORS = {
   // Accent Colors (Let's go with a vibrant orange like the habit tracker)
   primary: '#FFA726', // A vibrant orange
   primary_light: '#FFB74D',
+
+  text: '#000000', // Primary text color
+  text_secondary: '#555555', // Secondary text color
+
+  success: '#4CAF50', // Green for success messages
   
   // Semantic Colors
   danger: '#E53935',

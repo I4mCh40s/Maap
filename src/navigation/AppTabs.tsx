@@ -9,23 +9,19 @@ import MapScreen from '../screens/MapScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 
 type TabParamList = {
-  Map: { openCreateModal?: boolean };
-  // We only need two "real" tabs. The plus button is a separate UI element.
+  Map: undefined;
   Profile: undefined;
 };
 
 const Tab = createBottomTabNavigator<TabParamList>();
 
-// This is our fully custom tab bar component, inspired by your original code.
 function CustomTabBar({ state, navigation }: any) {
-  // `state.index` tells us which tab is active. 0 for Map, 1 for Profile.
   const isMapActive = state.index === 0;
   const isProfileActive = state.index === 1;
 
   return (
-    // This is the main container that holds the pill and the plus button
+    // The container that positions the tab bar
     <View style={styles.tabBarContainer}>
-
       {/* The floating dark grey pill */}
       <View style={styles.tabBarPill}>
         {/* Map Button */}
@@ -40,9 +36,6 @@ function CustomTabBar({ state, navigation }: any) {
           />
         </TouchableOpacity>
 
-        {/* This empty View creates the space for the plus button */}
-        <View style={{ width: 60 }} /> 
-
         {/* Profile Button */}
         <TouchableOpacity
           onPress={() => navigation.navigate('Profile')}
@@ -55,14 +48,6 @@ function CustomTabBar({ state, navigation }: any) {
           />
         </TouchableOpacity>
       </View>
-
-      {/* The floating plus button, sits on top */}
-      <TouchableOpacity
-        style={styles.plusButton}
-        onPress={() => navigation.navigate('Map', { openCreateModal: true })}
-      >
-        <MaterialCommunityIcons name="plus" size={28} color={theme.colors.black} />
-      </TouchableOpacity>
     </View>
   );
 }
@@ -70,7 +55,6 @@ function CustomTabBar({ state, navigation }: any) {
 export default function AppTabs() {
   return (
     <Tab.Navigator
-      // We pass our custom component to the `tabBar` prop
       tabBar={props => <CustomTabBar {...props} />}
       screenOptions={{
         headerShown: false,
@@ -83,45 +67,34 @@ export default function AppTabs() {
 }
 
 const styles = StyleSheet.create({
-  // The main container for positioning
   tabBarContainer: {
     position: 'absolute',
     bottom: 25,
-    left: 0,
-    right: 0,
+    left: 20, // Give some horizontal margin
+    right: 20,
     height: 65,
-    alignItems: 'center', // Centers the pill and plus button horizontally
+    alignItems: 'center',
   },
-  // The dark grey floating pill
   tabBarPill: {
     flexDirection: 'row',
     backgroundColor: theme.colors.darkGrey,
-    width: 240, // Fixed width
+    width: '100%', // Take up the available width within the container margins
+    maxWidth: 250, // Set a max width for larger screens
     height: '100%',
     borderRadius: 40,
-    justifyContent: 'space-between', // Pushes Map and Profile to the ends
+    justifyContent: 'space-around', // Evenly space the two icons
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.md, // Gives space at the ends
+    paddingHorizontal: theme.spacing.md,
     elevation: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 5 },
     shadowOpacity: 0.2,
     shadowRadius: 10,
   },
-  // The touchable area for Map and Profile icons
   tabButton: {
-    // We don't need flex:1 anymore, the icon itself will be centered
-  },
-  // The floating "+" button
-  plusButton: {
-    // Sits on top of the pill in the absolute center of the container
-    position: 'absolute',
-    bottom: 7,
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: theme.colors.primary,
-    justifyContent: 'center',
+    flex: 1, // Allow each button to take up equal space
     alignItems: 'center',
+    justifyContent: 'center',
   },
+  // The 'plusButton' style is no longer needed and has been removed.
 });

@@ -1,5 +1,7 @@
 package com.vitalyiam.Maap
 
+import com.vitalyiam.Maap.NFCPackage;
+
 import android.app.Application
 import android.content.res.Configuration
 
@@ -15,7 +17,6 @@ import com.facebook.soloader.SoLoader
 
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
-import com.vitalyiam.Maap.NFCPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -24,9 +25,9 @@ class MainApplication : Application(), ReactApplication {
         object : DefaultReactNativeHost(this) {
           override fun getPackages(): List<ReactPackage> {
             val packages = PackageList(this).packages
-            packages.add(NFCPackage())
             // Packages that cannot be autolinked yet can be added manually here, for example:
             // packages.add(MyReactNativePackage())
+                        packages.add(NFCPackage())
             return packages
           }
 
