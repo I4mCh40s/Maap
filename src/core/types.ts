@@ -6,6 +6,7 @@ export interface UserProfile {
   email: string;
   isBusiness: boolean; // CRITICAL: To switch between Hunter and Creator views
   businessId?: string; // Link to a business profile
+  redeemedVaults?: string[];
 }
 
 export interface BusinessProfile {

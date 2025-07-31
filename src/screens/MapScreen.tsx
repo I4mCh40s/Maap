@@ -17,12 +17,12 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
-import { collection, onSnapshot, query, where, orderBy, startAt, endAt, Unsubscribe } from 'firebase/firestore';
-import { db } from '../firebase';
+import { doc, collection, onSnapshot, query, where, orderBy, startAt, endAt, Unsubscribe } from 'firebase/firestore';
+import { db, auth } from '../firebase';
 import WebMapView from '../components/WebMapView';
 import theme from '../theme';
 import { geohashQueryBounds } from 'geofire-common';
-import { Vault } from '../core/types';
+import { Vault, UserProfile } from '../core/types';
 import { calculateDistance } from '../core/utils';
 
 
@@ -41,8 +41,31 @@ export default function MapScreen({ route, navigation }: any) {
   const [searchQuery, setSearchQuery] = useState('');
   const [jsToInject, setJsToInject] = useState<{ code: string; timestamp: number } | undefined>();
   const [distance, setDistance] = useState<string | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const isClaimed = userProfile?.redeemedVaults?.includes(selectedVault?.id || '');
 
   // --- EFFECT HOOKS ---
+
+  // Add this new useEffect inside your MapScreen component
+useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+        setUserProfile(null); // Clear profile on logout
+        return;
+    }
+
+    const userDocRef = doc(db, 'users', uid);
+    const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+            setUserProfile(docSnap.data() as UserProfile);
+        } else {
+            // This might happen if a user's doc wasn't created on signup
+            console.log("No user profile document found for UID:", uid);
+        }
+    });
+
+    return () => unsubscribe(); // Cleanup listener on unmount
+}, [auth.currentUser]); // Re-run when the user logs in or out
   
   // Handles "fly-to" requests
   useEffect(() => {
@@ -214,6 +237,8 @@ function onWebMessage(evt: any) {
     } catch (e: any) { Alert.alert('Search failed', e.message); }
     */
 }
+  // Get the list of redeemed vault IDs
+  const redeemedIds = userProfile?.redeemedVaults || [];
 
   // --- WebView HTML ---
 
@@ -239,6 +264,10 @@ function onWebMessage(evt: any) {
             font-size: 16px; font-weight: bold;
             box-shadow: 0 0 8px rgba(0,0,0,0.5);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; /* Use system font for icons */
+          }
+          .vault-marker.claimed {
+              opacity: 0.5;
+              filter: grayscale(100%);
           }
 
           /* --- CATEGORY-SPECIFIC STYLES --- */
@@ -266,14 +295,20 @@ function onWebMessage(evt: any) {
           const map = tt.map({ key: '${TOMTOM_KEY}', container: 'map', center: [${mapCenter.lng}, ${mapCenter.lat}], zoom: 14, style: "https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAMzJSMkJDa1NmTGNvR2h3RzsO9cOMFdVDGI-DPwgg0BlM.json?key=${TOMTOM_KEY}" });
           window.userMarker = new tt.Marker({ element: document.createElement('div') }).setLngLat([${mapCenter.lng}, ${mapCenter.lat}]).addTo(map);
           window.userMarker.getElement().className = 'user-marker';
-          
+          const claimedIds = ${JSON.stringify(redeemedIds)};
           let markers = [];
           function addMarkers(items) {
             markers.forEach(m => m.remove()); markers = [];
             items.forEach(item => {
               const el = document.createElement('div');
-              // --- DYNAMICALLY SET THE CLASS BASED ON CATEGORY ---
-              el.className = 'vault-marker vault-marker-' + (item.category || 'other');
+                  // Set the base class
+                  let className = 'vault-marker vault-marker-' + (item.category || 'other');
+                  
+                  // --- NEW: Add the 'claimed' class if applicable ---
+                  if (claimedIds.includes(item.id)) {
+                      className += ' claimed';
+                  }
+                  el.className = className;
               
               el.onclick = (event) => {
                 event.stopPropagation();
@@ -308,10 +343,24 @@ return (
             />
             {/* The UI elements on top of the map */}
             <View style={[styles.searchBar, { top: insets.top + theme.spacing.sm }]}>
-                {/* Search Bar Content */}
-            </View>
+            <MaterialCommunityIcons 
+                name="magnify" 
+                size={22} 
+                color={theme.colors.lightGrey} 
+                style={{ marginRight: theme.spacing.sm }}
+            />
+            <TextInput 
+                style={styles.searchInput} 
+                placeholder="Search location..." 
+                placeholderTextColor={theme.colors.lightGrey}
+                value={searchQuery} 
+                onChangeText={setSearchQuery} 
+                returnKeyType="search" 
+                onSubmitEditing={onSearch}
+            />
+        </View>
             <TouchableOpacity style={styles.locateButton} onPress={locateMe}>
-                {/* Locate Button Icon */}
+              <MaterialIcons name="my-location" size={24} color={theme.colors.lightGrey} />
             </TouchableOpacity>
         </SafeAreaView>
 
@@ -371,8 +420,14 @@ return (
                             </View>
                         </View>
                         {/* --- CTA Button --- */}
-                        <TouchableOpacity style={styles.ctaButton} onPress={handleBeginHunt}>
-                            <Text style={styles.ctaButtonText}>Begin Hunt</Text>
+                        <TouchableOpacity 
+                            style={[styles.ctaButton, isClaimed && styles.ctaButtonDisabled]} 
+                            onPress={handleBeginHunt}
+                            disabled={isClaimed} // <-- Disable the button if claimed
+                        >
+                            <Text style={styles.ctaButtonText}>
+                                {isClaimed ? "Already Claimed" : "Begin Hunt"}
+                            </Text>
                         </TouchableOpacity>
                     </View>
                 </TouchableOpacity>
@@ -383,7 +438,6 @@ return (
 }
 
 
-// --- NEW STYLES OBJECT FOR THE FLOATING CARD ---
 const styles = StyleSheet.create({
     container: {
         flex: 1,
@@ -396,42 +450,87 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center'
     },
-    searchBar: { /* Your existing searchBar styles */ },
-    locateButton: { /* Your existing locateButton styles */ },
+    // Search and Locate Buttons Styles
+    searchBar: {
+        position: 'absolute',
+        left: theme.spacing.md,
+        right: theme.spacing.md,
+        height: 50,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: theme.spacing.md,
+        backgroundColor: 'rgba(30, 30, 30, 0.9)',
+        borderRadius: 25,
+        borderWidth: 1,
+        borderColor: theme.colors.mediumGrey,
+        zIndex: 10,
+    },
+    searchInput: {
+        flex: 1,
+        fontSize: theme.fontSizes.body,
+        color: theme.colors.white,
+    },
+    locateButton: {
+        position: 'absolute',
+        right: theme.spacing.md,
+        bottom: 100,
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        backgroundColor: 'rgba(30, 30, 30, 0.9)',
+        borderWidth: 1,
+        borderColor: theme.colors.mediumGrey,
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10,
+    },
     
-    // Styles for the new Modal
+    // Styles for the Modal
     modalBackdrop: {
         flex: 1,
-        justifyContent: 'center', // Center the card vertically
-        alignItems: 'center',     // Center the card horizontally
-        backgroundColor: 'rgba(0, 0, 0, 0.4)', // Semi-transparent black
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
     },
     modalCard: {
         width: '90%',
-        maxWidth: 380, // A max width for larger devices
+        maxWidth: 380,
         backgroundColor: 'white',
         borderRadius: 20,
         padding: 24,
         elevation: 10,
         shadowColor: "#000",
-        shadowOffset: {
-            width: 0,
-            height: 4,
-        },
+        shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.25,
         shadowRadius: 12,
     },
-    cardContent: {}, // Wrapper for content if needed
+    cardContent: {},
     cardHeader: {
-        flexDirection: 'row', // Make items align horizontally
-        alignItems: 'center',  // Align items vertically in the center
+        flexDirection: 'row',
+        alignItems: 'center',
         marginBottom: 8,
+    },
+    logoImage: {
+        width: 44,
+        height: 44,
+        borderRadius: 8,
+        marginRight: 12,
+        backgroundColor: '#f0f0f0'
+    },
+    logoPlaceholder: {
+        width: 44,
+        height: 44,
+        borderRadius: 8,
+        marginRight: 12,
+        backgroundColor: '#E5E5EA',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     cardTitle: {
         fontSize: 24,
         fontWeight: 'bold',
         color: '#1D1D1F',
-        flex: 1, // Allows text to wrap if it's too long
+        flex: 1,
     },
     cardSubHeader: {
         marginBottom: 20,
@@ -448,25 +547,19 @@ const styles = StyleSheet.create({
         marginBottom: 20,
     },
     infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between', // <-- CHANGE THIS
-    marginBottom: 24,
-},
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 24,
+    },
+    infoItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
     infoLabel: {
         fontSize: 16,
         color: '#3C3C43',
         marginLeft: 8,
-    },
-    infoItem: { // <-- NEW STYLE
-    flexDirection: 'row',
-    alignItems: 'center',
-},
-    infoValue: {
-        fontSize: 16,
-        fontWeight: 'bold',
-        color: '#1D1D1F',
-        marginLeft: 'auto',
     },
     ctaButton: {
         backgroundColor: theme.colors.primary,
@@ -474,25 +567,12 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         alignItems: 'center',
     },
+    ctaButtonDisabled: {
+        backgroundColor: '#999', // A clearer disabled color
+    },
     ctaButtonText: {
         color: 'white',
         fontSize: 18,
         fontWeight: 'bold',
-    },
-    logoImage: {
-        width: 44,
-        height: 44,
-        borderRadius: 8,
-        marginRight: 12, // Space between logo and text
-        backgroundColor: '#f0f0f0' // A light background color for loading
-    },
-    logoPlaceholder: {
-        width: 44,
-        height: 44,
-        borderRadius: 8,
-        marginRight: 12,
-        backgroundColor: '#E5E5EA', // A neutral grey
-        justifyContent: 'center',
-        alignItems: 'center',
     },
 });

@@ -6,8 +6,8 @@ import {
 } from 'react-native';
 import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { doc, getDoc, updateDoc, increment } from 'firebase/firestore';
-import { db } from '../firebase';
+import { doc, getDoc, updateDoc, increment, FieldValue, arrayUnion, setDoc } from 'firebase/firestore';
+import { db, auth } from '../firebase';
 import { Vault } from '../core/types';
 import theme from '../theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -45,60 +45,46 @@ const VaultHuntScreen = () => {
   // Effect to fetch initial data and start watching location
   useEffect(() => {
     let locationSubscription: Location.LocationSubscription | null = null;
-
     const setupHunt = async () => {
-      try {
-        // 1. Fetch Vault Data
+        // We will fetch the vault FIRST.
         const vaultDocRef = doc(db, 'vaults', vaultId);
         const docSnap = await getDoc(vaultDocRef);
-        if (!docSnap.exists()) throw new Error('This vault no longer exists.');
+        if (!docSnap.exists()) throw new Error('Vault not found.');
         const fetchedVault = { id: docSnap.id, ...docSnap.data() } as Vault;
         setVault(fetchedVault);
 
-        // 2. Get initial location & start watching
+        // We can set loading false here, the map will show a spinner until location is ready.
+        setIsLoading(false);
+        
         let { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') throw new Error('Location permission is required to hunt.');
-
+        if (status !== 'granted') throw new Error('Location permission is required.');
+        
+        // This subscription now handles ALL user location updates.
         locationSubscription = await Location.watchPositionAsync(
             { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 2000, distanceInterval: 5 },
             (newLocation) => {
                 const currentUserLocation = { lat: newLocation.coords.latitude, lng: newLocation.coords.longitude };
-                setUserLocation(currentUserLocation);
+                // Set the user location ONCE for the initial map render, then only update state.
+                setUserLocation(current => current ? current : currentUserLocation);
 
-                // Live update distance and proximity
                 const distString = calculateDistance(currentUserLocation.lat, currentUserLocation.lng, fetchedVault.location.latitude, fetchedVault.location.longitude);
                 setDistance(distString);
-                
-                // Raw distance calculation for proximity check
                 const rawDistanceMeters = getRawDistance(currentUserLocation.lat, currentUserLocation.lng, fetchedVault.location.latitude, fetchedVault.location.longitude);
                 setIsUserInProximity(rawDistanceMeters <= PROXIMITY_RADIUS_METERS);
-
-                // Update user marker on map
                 wv.current?.injectJavaScript(`updateUserMarker(${currentUserLocation.lat}, ${currentUserLocation.lng});`);
             }
         );
-
-      } catch (e: any) {
-        Alert.alert('Error Starting Hunt', e.message);
-        navigation.goBack();
-      } finally {
-        setIsLoading(false);
-      }
     };
+    setupHunt().catch(e => { Alert.alert('Error', e.message, [{ text: 'OK', onPress: () => navigation.goBack() }]) });
+    return () => { locationSubscription?.remove(); };
+}, [vaultId]);
 
-    setupHunt();
-
-    // Cleanup function
-    return () => {
-        locationSubscription?.remove();
-    };
-  }, [vaultId]);
-
-  const mapHtml = useMemo(() => {
-      // --- FIX: Ensure BOTH vault and userLocation exist before generating HTML ---
-      if (!vault || !userLocation) return ''; 
-      const TOMTOM_KEY = 'zoyiO1lknbi8bagOcFtqev5TcihUwvbR';
-
+const mapHtml = useMemo(() => {
+    // THIS is now the single point of truth. HTML is only generated when BOTH are ready.
+    if (!vault || !userLocation) {
+        return `<html><body style="background-color: #333;"></body></html>`; // Return blank HTML
+    }
+    const TOMTOM_KEY = 'zoyiO1lknbi8bagOcFtqev5TcihUwvbR';
       return `
         <!DOCTYPE html><html><head>
           <style>html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden; background-color: #333;}</style>
@@ -149,14 +135,29 @@ const VaultHuntScreen = () => {
     try {
         const scannedTagId: string = await NFCModule.scanTag();
         if (scannedTagId === vault.nfcTagId) {
+            // SUCCESS!
+
+            const uid = auth.currentUser!.uid; // Get the current user's ID
+            if (!uid) throw new Error("User not found.");
+
+            // 1. Get references to both documents we need to update
             const vaultDocRef = doc(db, 'vaults', vault.id);
+            const userDocRef = doc(db, 'users', uid);
+
+            // --- THIS IS THE NEW LOGIC ---
+            // 2. Perform both database updates
             await updateDoc(vaultDocRef, { claimedQuantity: increment(1) });
-            // Use replace to prevent user from going back to this hunt screen
+            await setDoc(userDocRef, {
+                redeemedVaults: arrayUnion(vault.id)
+            }, { merge: true });
+            // --- END NEW LOGIC ---
+
             navigation.replace('Reward', { vault });
         } else {
             Alert.alert("Wrong Vault", "This isn't the correct tag. Keep searching!");
         }
-    } catch (e: any) { /* silent fail for user cancellation */
+    } catch (e: any) {
+        console.log("Scan or DB Update Error:", e.message);
     } finally {
         setIsScanning(false);
     }
